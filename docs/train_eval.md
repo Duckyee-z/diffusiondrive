@@ -17,7 +17,7 @@ Before starting training, ensure that you correctly set the `bkb_path` to the pa
 ```bash
 HYDRA_FULL_ERROR=1 CUDA_VISIBLE_DEVICES="1,2,3,4" python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         agent=diffusiondrive_agent \
-        experiment_name=training_diffusiondrive_agent1  \
+        experiment_name=vanilla_diffusiondrive_agent  \
         train_test_split=navtrain  \
         split=trainval   \
         trainer.params.max_epochs=100 \

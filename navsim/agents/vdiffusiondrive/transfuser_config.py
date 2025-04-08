@@ -60,6 +60,9 @@ class TransfuserConfig:
     # Initial weight of the layer norms in the gpt.
     gpt_layer_norm_init_weight = 1.0
 
+    # diffusion
+    sampling_timesteps = 20
+
     perspective_downsample_factor = 1
     transformer_decoder_join = True
     detect_boxes = True

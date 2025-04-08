@@ -33,6 +33,8 @@ class V2TransfuserModel(nn.Module):
         ]
 
         self._config = config
+        self.sampling_timesteps = config.sampling_timesteps
+
         self._backbone = TransfuserBackbone(config)
 
         self._keyval_embedding = nn.Embedding(8**2 + 1, config.tf_d_model)  # 8x8 feature grid + trajectory
@@ -386,7 +388,7 @@ class CustomTransformerDecoder(nn.Module):
 class TrajectoryHead(nn.Module):
     """Trajectory prediction head."""
 
-    def __init__(self, num_poses: int, d_ffn: int, d_model: int, plan_anchor_path: str,config: TransfuserConfig):
+    def __init__(self, num_poses: int, d_ffn: int, d_model: int, plan_anchor_path: str, config: TransfuserConfig):
         """
         Initializes trajectory head.
         :param num_poses: number of (x,y,θ) poses to predict
@@ -395,7 +397,7 @@ class TrajectoryHead(nn.Module):
         """
         super(TrajectoryHead, self).__init__()
 
-
+        self.sampling_timesteps = config.sampling_timesteps
         self._num_poses = num_poses
         self._d_model = d_model
         self._d_ffn = d_ffn
@@ -409,8 +411,8 @@ class TrajectoryHead(nn.Module):
             beta_schedule="scaled_linear",
             prediction_type="sample",
         )
-        if dist.get_rank() == 0:
-            print("=========init vanilla diffuison trajectory head=========")
+        # if dist.get_rank() == 0:
+        print("=========init vanilla diffuison trajectory head=========")
         # plan_anchor = np.load(plan_anchor_path)
 
         # self.plan_anchor = nn.Parameter(
@@ -474,13 +476,13 @@ class TrajectoryHead(nn.Module):
         plan_anchor = []
         for batch in range(bs):
             random_int = torch.randint(0, n_trajs, (1,)).item()
-            random_anchor = torch.randn((n_trajs, 8, 3))
-            random_anchor[random_int,...] = gt_trajs[batch, ...]
+            random_anchor = torch.randn((n_trajs, 8, 2))
+            random_anchor[random_int,...] = gt_trajs[batch, ...,:2]
             plan_anchor.append(random_anchor)
 
-        plan_anchor = torch.stack(plan_anchor, dim=0)
+        plan_anchor = torch.stack(plan_anchor, dim=0).to(device)
 
-        odo_info_fut = self.norm_odo(plan_anchor) # torch.Size([64, 20, 8, 2])
+        odo_info_fut = self.norm_odo(plan_anchor).to(device) # torch.Size([64, 20, 8, 2])
         timesteps = torch.randint(
             0, 1000,
             (bs,), device=device
@@ -520,25 +522,29 @@ class TrajectoryHead(nn.Module):
         return {"trajectory": best_reg,"trajectory_loss":ret_traj_loss,"trajectory_loss_dict":trajectory_loss_dict}
 
     def forward_test(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding,global_img) -> Dict[str, torch.Tensor]:
-        step_num = 2
         bs = ego_query.shape[0]
         device = ego_query.device
         self.diffusion_scheduler.set_timesteps(1000, device)
-        step_ratio = 20 / step_num
         n_trajs = self.n_trajs
-        roll_timesteps = (np.arange(0, step_num) * step_ratio).round()[::-1].copy().astype(np.int64)
-        roll_timesteps = torch.from_numpy(roll_timesteps).to(device)
+
+        times = torch.linspace(-1, 1000-1, steps=self.sampling_timesteps + 1)
+        times = list(reversed(times.int().tolist()))
+        sample_timesteps = torch.tensor(times).to(device)
+        # sample_timesteps = torch.stack([sample_timesteps] * bs, dim=0)
+        # roll_timesteps = (np.arange(0, step_num) * step_ratio).round()[::-1].copy().astype(np.int64)
+        # roll_timesteps = torch.from_numpy(roll_timesteps).to(device)
 
 
-        # 1. add truncated noise to the plan anchor
-        plan_anchor = torch.randn((bs,n_trajs, 8, 3))
-        img = self.norm_odo(plan_anchor)
+        # 1. add noise to the plan anchor
+        plan_anchor = torch.randn((bs,n_trajs, 8, 2))
+        img = self.norm_odo(plan_anchor).to(device) # torch.Size([64, 20, 8, 2])
         noise = torch.randn(img.shape, device=device)
-        trunc_timesteps = torch.ones((bs,), device=device, dtype=torch.long) * 8
-        img = self.diffusion_scheduler.add_noise(original_samples=img, noise=noise, timesteps=trunc_timesteps)
+        # trunc_timesteps = torch.ones((bs,), device=device, dtype=torch.long) * 8
+
+        # img = self.diffusion_scheduler.add_noise(original_samples=img, noise=noise, timesteps=sample_timesteps)
         noisy_trajs = self.denorm_odo(img)
         ego_fut_mode = img.shape[1]
-        for k in roll_timesteps[:]:
+        for k in sample_timesteps[:]:
             x_boxes = torch.clamp(img, min=-1, max=1)
             noisy_traj_points = self.denorm_odo(x_boxes)
 
