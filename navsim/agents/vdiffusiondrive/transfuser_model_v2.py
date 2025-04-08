@@ -3,17 +3,19 @@ import numpy as np
 import torch
 import torch.nn as nn
 import copy
-from navsim.agents.diffusiondrive.transfuser_config import TransfuserConfig
-from navsim.agents.diffusiondrive.transfuser_backbone import TransfuserBackbone
-from navsim.agents.diffusiondrive.transfuser_features import BoundingBox2DIndex
+from navsim.agents.vdiffusiondrive.transfuser_config import TransfuserConfig
+from navsim.agents.vdiffusiondrive.transfuser_backbone import TransfuserBackbone
+from navsim.agents.vdiffusiondrive.transfuser_features import BoundingBox2DIndex
 from navsim.common.enums import StateSE2Index
 from diffusers.schedulers import DDIMScheduler
-from navsim.agents.diffusiondrive.modules.conditional_unet1d import ConditionalUnet1D,SinusoidalPosEmb
+from navsim.agents.vdiffusiondrive.modules.conditional_unet1d import ConditionalUnet1D,SinusoidalPosEmb
 import torch.nn.functional as F
-from navsim.agents.diffusiondrive.modules.blocks import linear_relu_ln,bias_init_with_prob, gen_sineembed_for_position, GridSampleCrossBEVAttention
-from navsim.agents.diffusiondrive.modules.multimodal_loss import LossComputer
+from navsim.agents.vdiffusiondrive.modules.blocks import linear_relu_ln,bias_init_with_prob, gen_sineembed_for_position, GridSampleCrossBEVAttention
+from navsim.agents.vdiffusiondrive.modules.multimodal_loss import LossComputer
 from torch.nn import TransformerDecoder,TransformerDecoderLayer
 from typing import Any, List, Dict, Optional, Union
+import torch.distributed as dist
+
 class V2TransfuserModel(nn.Module):
     """Torch module for Transfuser."""
 
@@ -393,25 +395,29 @@ class TrajectoryHead(nn.Module):
         """
         super(TrajectoryHead, self).__init__()
 
+
         self._num_poses = num_poses
         self._d_model = d_model
         self._d_ffn = d_ffn
         self.diff_loss_weight = 2.0
         self.ego_fut_mode = 20
 
+        self.n_trajs = 20
+
         self.diffusion_scheduler = DDIMScheduler(
             num_train_timesteps=1000,
             beta_schedule="scaled_linear",
             prediction_type="sample",
         )
+        if dist.get_rank() == 0:
+            print("=========init vanilla diffuison trajectory head=========")
+        # plan_anchor = np.load(plan_anchor_path)
 
+        # self.plan_anchor = nn.Parameter(
+        #     torch.tensor(plan_anchor, dtype=torch.float32),
+        #     requires_grad=False,
+        # ) # 20,8,2
 
-        plan_anchor = np.load(plan_anchor_path)
-
-        self.plan_anchor = nn.Parameter(
-            torch.tensor(plan_anchor, dtype=torch.float32),
-            requires_grad=False,
-        ) # 20,8,2
         self.plan_anchor_encoder = nn.Sequential(
             *linear_relu_ln(d_model, 1, 1,512),
             nn.Linear(d_model, d_model),
@@ -432,6 +438,7 @@ class TrajectoryHead(nn.Module):
         self.diff_decoder = CustomTransformerDecoder(diff_decoder_layer, 2)
 
         self.loss_computer = LossComputer(config)
+
     def norm_odo(self, odo_info_fut): # odo_info_fut ([64, 20, 8, 2])
         odo_info_fut_x = odo_info_fut[..., 0:1] # ([64, 20, 8, 1])
         odo_info_fut_y = odo_info_fut[..., 1:2] # ([64, 20, 8, 1]) 
@@ -461,11 +468,21 @@ class TrajectoryHead(nn.Module):
     def forward_train(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding, targets=None,global_img=None) -> Dict[str, torch.Tensor]:
         bs = ego_query.shape[0]
         device = ego_query.device
-        # 1. add truncated noise to the plan anchor
-        plan_anchor = self.plan_anchor.unsqueeze(0).repeat(bs,1,1,1) # torch.Size([64, 20, 8, 2])
+        
+        gt_trajs = targets.get('trajectory') # torch.Size([64, 8, 3])
+        n_trajs = self.n_trajs
+        plan_anchor = []
+        for batch in range(bs):
+            random_int = torch.randint(0, n_trajs, (1,)).item()
+            random_anchor = torch.randn((n_trajs, 8, 3))
+            random_anchor[random_int,...] = gt_trajs[batch, ...]
+            plan_anchor.append(random_anchor)
+
+        plan_anchor = torch.stack(plan_anchor, dim=0)
+
         odo_info_fut = self.norm_odo(plan_anchor) # torch.Size([64, 20, 8, 2])
         timesteps = torch.randint(
-            0, 50,
+            0, 1000,
             (bs,), device=device
         )
         noise = torch.randn(odo_info_fut.shape, device=device)
@@ -486,7 +503,6 @@ class TrajectoryHead(nn.Module):
         # 3. embed the timesteps
         time_embed = self.time_mlp(timesteps)
         time_embed = time_embed.view(bs,1,-1)
-
 
         # 4. begin the stacked decoder
         poses_reg_list, poses_cls_list = self.diff_decoder(traj_feature, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding,global_img)
@@ -509,12 +525,13 @@ class TrajectoryHead(nn.Module):
         device = ego_query.device
         self.diffusion_scheduler.set_timesteps(1000, device)
         step_ratio = 20 / step_num
+        n_trajs = self.n_trajs
         roll_timesteps = (np.arange(0, step_num) * step_ratio).round()[::-1].copy().astype(np.int64)
         roll_timesteps = torch.from_numpy(roll_timesteps).to(device)
 
 
         # 1. add truncated noise to the plan anchor
-        plan_anchor = self.plan_anchor.unsqueeze(0).repeat(bs,1,1,1)
+        plan_anchor = torch.randn((bs,n_trajs, 8, 3))
         img = self.norm_odo(plan_anchor)
         noise = torch.randn(img.shape, device=device)
         trunc_timesteps = torch.ones((bs,), device=device, dtype=torch.long) * 8

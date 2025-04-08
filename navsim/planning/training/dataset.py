@@ -37,6 +37,7 @@ class CacheOnlyDataset(torch.utils.data.Dataset):
         feature_builders: List[AbstractFeatureBuilder],
         target_builders: List[AbstractTargetBuilder],
         log_names: Optional[List[str]] = None,
+        debug : bool = False
     ):
         """
         Initializes the dataset module.
@@ -53,6 +54,10 @@ class CacheOnlyDataset(torch.utils.data.Dataset):
             self.log_names = [Path(log_name) for log_name in log_names if (self._cache_path / log_name).is_dir()]
         else:
             self.log_names = [log_name for log_name in self._cache_path.iterdir()]
+
+        if debug:
+            self.log_names = self.log_names[:8]
+
 
         self._feature_builders = feature_builders
         self._target_builders = target_builders
