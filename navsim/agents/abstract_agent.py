@@ -3,6 +3,8 @@ from typing import Dict, Union, List
 import torch
 import pytorch_lightning as pl
 
+from pytorch_lightning.callbacks import ModelCheckpoint
+
 from navsim.common.dataclasses import AgentInput, Trajectory, SensorConfig
 from navsim.planning.training.abstract_feature_target_builder import AbstractFeatureBuilder, AbstractTargetBuilder
 

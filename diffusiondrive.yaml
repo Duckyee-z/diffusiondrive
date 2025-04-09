@@ -1,6 +1,6 @@
 REQUIRED:
 #WARNNING: JOB_NAME must be uniq
-  JOB_NAME: "vanilla_diffusiondrive"
+  JOB_NAME: "vdiffusiondrive-v1.1-step20"
   JOB_PASSWD: "sakura123"
   UPLOAD_DIR: "./"
   WORKER_MIN_NUM: 1

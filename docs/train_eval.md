@@ -33,3 +33,5 @@ HYDRA_FULL_ERROR=1 python navsim/planning/script/run_pdm_score.py train_test_spl
 ```
 
 python navsim/planning/script/run_pdm_score.py train_test_split=navtest agent=diffusiondrive_agent worker=ray_distributed 'agent.checkpoint_path=/home/users/zhiyu.zheng/workplace/e2ead/DiffusionDrive/epoch\=99-step\=16700.ckpt' experiment_name=diffusiondrive_agent_eval
+
+python navsim/planning/script/run_pdm_score.py train_test_split=navtest agent=vanilla_diffusiondrive_agent worker=ray_distributed 'agent.checkpoint_path=/home/users/zhiyu.zheng/workplace/e2ead/DiffusionDrive/epoch\=99-step\=16700.ckpt' experiment_name=vanilla_diffusiondrive_agent_eval

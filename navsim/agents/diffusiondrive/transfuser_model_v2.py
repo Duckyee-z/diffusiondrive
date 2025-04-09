@@ -228,6 +228,7 @@ class DiffMotionPlanningRefinementModule(nn.Module):
         plan_reg = traj_delta.reshape(bs,ego_fut_mode, self.ego_fut_ts, 3)
 
         return plan_reg, plan_cls
+    
 class ModulationLayer(nn.Module):
 
     def __init__(self, embed_dims: int, condition_dims: int):
@@ -477,15 +478,15 @@ class TrajectoryHead(nn.Module):
         noisy_traj_points = torch.clamp(noisy_traj_points, min=-1, max=1)
         noisy_traj_points = self.denorm_odo(noisy_traj_points)
 
-        ego_fut_mode = noisy_traj_points.shape[1]
+        ego_fut_mode = noisy_traj_points.shape[1] # torch.Size([64, 20, 8, 2])
         # 2. proj noisy_traj_points to the query
-        traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64)
-        traj_pos_embed = traj_pos_embed.flatten(-2)
-        traj_feature = self.plan_anchor_encoder(traj_pos_embed)
-        traj_feature = traj_feature.view(bs,ego_fut_mode,-1)
+        traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64) # torch.Size([64, 20, 8, 64])
+        traj_pos_embed = traj_pos_embed.flatten(-2) # torch.Size([64, 20, 512])
+        traj_feature = self.plan_anchor_encoder(traj_pos_embed) # torch.Size([64, 20, 256])
+        traj_feature = traj_feature.view(bs,ego_fut_mode,-1) # torch.Size([64, 20, 256])
         # 3. embed the timesteps
-        time_embed = self.time_mlp(timesteps)
-        time_embed = time_embed.view(bs,1,-1)
+        time_embed = self.time_mlp(timesteps) # torch.Size([64, 256])
+        time_embed = time_embed.view(bs,1,-1) # torch.Size([64, 1, 256])
 
 
         # 4. begin the stacked decoder
