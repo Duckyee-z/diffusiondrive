@@ -393,7 +393,7 @@ class TrajectoryHead(nn.Module):
         :param d_model: input dimensionality
         """
         super(TrajectoryHead, self).__init__()
-        print("================= Init vdiffusiondrivev2 ====================")
+        print("================= Init vdiffusiondrivev2.2 ====================")
         self.n_trajs = 20
 
         self._num_poses = num_poses
