@@ -501,7 +501,7 @@ class TrajectoryHead(nn.Module):
         trajectory_loss_dict = {}
         ret_traj_loss = 0
         for idx, (poses_reg, poses_cls) in enumerate(zip(poses_reg_list, poses_cls_list)):
-            trajectory_loss = self.loss_computer(poses_reg, poses_cls, targets, noisy_traj_points)
+            trajectory_loss = self.loss_computer(poses_reg, poses_cls, targets, plan_anchor) # 
             trajectory_loss_dict[f"trajectory_loss_{idx}"] = trajectory_loss
             ret_traj_loss += trajectory_loss
 
