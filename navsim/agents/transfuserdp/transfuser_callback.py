@@ -53,7 +53,7 @@ class TransfuserCallback(pl.Callback):
             features, targets = next(iter(trainer.val_dataloaders))
             features, targets = dict_to_device(features, device), dict_to_device(targets, device)
             with torch.no_grad():
-                predictions = lightning_module.agent.forward(features)
+                predictions = lightning_module.agent.forward(features,targets)
 
             features, targets, predictions = (
                 dict_to_device(features, "cpu"),
@@ -85,7 +85,7 @@ class TransfuserCallback(pl.Callback):
             features, targets = next(iter(trainer.train_dataloader))
             features, targets = dict_to_device(features, device), dict_to_device(targets, device)
             with torch.no_grad():
-                predictions = lightning_module.agent.forward(features)
+                predictions = lightning_module.agent.forward(features,targets)
 
             features, targets, predictions = (
                 dict_to_device(features, "cpu"),

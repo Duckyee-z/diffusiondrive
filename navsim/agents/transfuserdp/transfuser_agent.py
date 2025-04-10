@@ -15,7 +15,7 @@ from navsim.common.dataclasses import SensorConfig
 from navsim.planning.training.abstract_feature_target_builder import AbstractFeatureBuilder, AbstractTargetBuilder
 
 
-class TransfuserDPAgent(AbstractAgent):
+class TransfuserAgent(AbstractAgent):
     """Agent interface for TransFuser baseline."""
 
     def __init__(
@@ -64,9 +64,9 @@ class TransfuserDPAgent(AbstractAgent):
         """Inherited, see superclass."""
         return [TransfuserFeatureBuilder(config=self._config)]
 
-    def forward(self, features: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def forward(self, features: Dict[str, torch.Tensor], targets: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Inherited, see superclass."""
-        return self._transfuser_model(features)
+        return self._transfuser_model(features, targets)
 
     def compute_loss(
         self,

@@ -393,6 +393,8 @@ class TrajectoryHead(nn.Module):
         :param d_model: input dimensionality
         """
         super(TrajectoryHead, self).__init__()
+        print("================= Init vdiffusiondrivev2 ====================")
+        self.n_trajs = 20
 
         self._num_poses = num_poses
         self._d_model = d_model
@@ -406,13 +408,13 @@ class TrajectoryHead(nn.Module):
             prediction_type="sample",
         )
 
+        self.sampling_timesteps = config.sampling_timesteps
+        # plan_anchor = np.load(plan_anchor_path)
 
-        plan_anchor = np.load(plan_anchor_path)
-
-        self.plan_anchor = nn.Parameter(
-            torch.tensor(plan_anchor, dtype=torch.float32),
-            requires_grad=False,
-        ) # 20,8,2
+        # self.plan_anchor = nn.Parameter(
+        #     torch.tensor(plan_anchor, dtype=torch.float32),
+        #     requires_grad=False,
+        # ) # 20,8,2
         self.plan_anchor_encoder = nn.Sequential(
             *linear_relu_ln(d_model, 1, 1,512),
             nn.Linear(d_model, d_model),
@@ -463,10 +465,13 @@ class TrajectoryHead(nn.Module):
         bs = ego_query.shape[0]
         device = ego_query.device
         # 1. add truncated noise to the plan anchor
-        plan_anchor = self.plan_anchor.unsqueeze(0).repeat(bs,1,1,1) # torch.Size([64, 20, 8, 2])
+        gt_trajs = targets.get('trajectory') # torch.Size([64, 8, 3])
+        n_trajs = self.n_trajs
+
+        plan_anchor = torch.stack([gt_trajs[...,:2]]*n_trajs, dim=1).to(device) # torch.Size([64, 20, 8, 2])
         odo_info_fut = self.norm_odo(plan_anchor) # torch.Size([64, 20, 8, 2])
         timesteps = torch.randint(
-            0, 50,
+            0, 1000,
             (bs,), device=device
         )
         noise = torch.randn(odo_info_fut.shape, device=device)
@@ -488,7 +493,6 @@ class TrajectoryHead(nn.Module):
         time_embed = self.time_mlp(timesteps) # torch.Size([64, 256])
         time_embed = time_embed.view(bs,1,-1) # torch.Size([64, 1, 256])
 
-
         # 4. begin the stacked decoder
         poses_reg_list, poses_cls_list = self.diff_decoder(traj_feature, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding,global_img)
 
@@ -505,24 +509,25 @@ class TrajectoryHead(nn.Module):
         return {"trajectory": best_reg,"trajectory_loss":ret_traj_loss,"trajectory_loss_dict":trajectory_loss_dict}
 
     def forward_test(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding,global_img) -> Dict[str, torch.Tensor]:
-        step_num = 2
+
         bs = ego_query.shape[0]
         device = ego_query.device
         self.diffusion_scheduler.set_timesteps(1000, device)
-        step_ratio = 20 / step_num
-        roll_timesteps = (np.arange(0, step_num) * step_ratio).round()[::-1].copy().astype(np.int64)
-        roll_timesteps = torch.from_numpy(roll_timesteps).to(device)
+        n_trajs = self.n_trajs
 
+        times = torch.linspace(-1, 1000-1, steps=self.sampling_timesteps + 1)
+        times = list(reversed(times.int().tolist()))
+        sample_timesteps = torch.tensor(times).to(device)
 
-        # 1. add truncated noise to the plan anchor
-        plan_anchor = self.plan_anchor.unsqueeze(0).repeat(bs,1,1,1)
+        # 1. add noise to the plan anchor
+        plan_anchor = torch.randn((bs,n_trajs, 8, 2)).to(device)
         img = self.norm_odo(plan_anchor)
-        noise = torch.randn(img.shape, device=device)
-        trunc_timesteps = torch.ones((bs,), device=device, dtype=torch.long) * 8
-        img = self.diffusion_scheduler.add_noise(original_samples=img, noise=noise, timesteps=trunc_timesteps)
-        noisy_trajs = self.denorm_odo(img)
+        # noise = torch.randn(img.shape, device=device)
+        # noisy_trajs = self.denorm_odo(img)
         ego_fut_mode = img.shape[1]
-        for k in roll_timesteps[:]:
+        for k in sample_timesteps[:]:
+            if k == -1:
+                continue
             x_boxes = torch.clamp(img, min=-1, max=1)
             noisy_traj_points = self.denorm_odo(x_boxes)
 

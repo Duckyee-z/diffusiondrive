@@ -84,6 +84,8 @@ class TransfuserConfig:
     trajectory_reg_weight: float = 8.0
     diff_loss_weight: float = 20.0
     
+    sampling_timesteps: int = 2
+
     agent_class_weight: float = 10.0
     agent_box_weight: float = 1.0
     bev_semantic_weight: float = 14.0

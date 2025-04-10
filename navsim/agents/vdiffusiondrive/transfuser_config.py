@@ -61,7 +61,7 @@ class TransfuserConfig:
     gpt_layer_norm_init_weight = 1.0
 
     # diffusion
-    sampling_timesteps = 2
+    sampling_timesteps = 20
 
     perspective_downsample_factor = 1
     transformer_decoder_join = True

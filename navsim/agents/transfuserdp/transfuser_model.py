@@ -7,7 +7,8 @@ from navsim.agents.transfuserdp.transfuser_config import TransfuserConfig
 from navsim.agents.transfuserdp.transfuser_backbone import TransfuserBackbone
 from navsim.agents.transfuserdp.transfuser_features import BoundingBox2DIndex
 from navsim.common.enums import StateSE2Index
-
+from navsim.agents.transfuserdp.modules.conditional_unet1d import ConditionalUnet1D, SinusoidalPosEmb
+from diffusers.schedulers import DDIMScheduler
 
 class TransfuserModel(nn.Module):
     """Torch module for Transfuser."""
@@ -19,6 +20,8 @@ class TransfuserModel(nn.Module):
         """
 
         super().__init__()
+
+        print("================ Init TransfuserDP ================")
 
         self._query_splits = [
             1,
@@ -79,9 +82,10 @@ class TransfuserModel(nn.Module):
             num_poses=config.trajectory_sampling.num_poses,
             d_ffn=config.tf_d_ffn,
             d_model=config.tf_d_model,
+            config=config,
         )
 
-    def forward(self, features: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def forward(self, features: Dict[str, torch.Tensor], targets: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Torch module forward pass."""
 
         camera_feature: torch.Tensor = features["camera_feature"]
@@ -106,7 +110,8 @@ class TransfuserModel(nn.Module):
         trajectory_query, agents_query = query_out.split(self._query_splits, dim=1)
 
         output: Dict[str, torch.Tensor] = {"bev_semantic_map": bev_semantic_map}
-        trajectory = self._trajectory_head(trajectory_query)
+
+        trajectory = self._trajectory_head(trajectory_query, targets)
         output.update(trajectory)
 
         agents = self._agent_head(agents_query)
@@ -161,7 +166,7 @@ class AgentHead(nn.Module):
 class TrajectoryHead(nn.Module):
     """Trajectory prediction head."""
 
-    def __init__(self, num_poses: int, d_ffn: int, d_model: int):
+    def __init__(self, num_poses: int, d_ffn: int, d_model: int, config: TransfuserConfig):
         """
         Initializes trajectory head.
         :param num_poses: number of (x,y,θ) poses to predict
@@ -174,14 +179,94 @@ class TrajectoryHead(nn.Module):
         self._d_model = d_model
         self._d_ffn = d_ffn
 
+        embed_dims = config.diffunet_embed_dims
+        self.num_train_timesteps = config.num_train_timesteps
+        self.num_infer_times = config.num_infer_times
+
+
+        self.diffusion_scheduler = DDIMScheduler(
+            num_train_timesteps=self.num_train_timesteps,
+            beta_schedule="scaled_linear",
+            prediction_type="sample",
+        )
+
+        self.noise_pred_net = ConditionalUnet1D(
+            input_dim=d_model,
+            local_cond_dim=None,
+            global_cond_dim=embed_dims,
+            diffusion_step_embed_dim=embed_dims,
+            down_dims=[embed_dims, embed_dims * 2, embed_dims * 4],
+            kernel_size=3,
+            n_groups=8,
+            cond_predict_scale=True,
+        )
+        print("=========init TransfuserDP head=========")
         self._mlp = nn.Sequential(
             nn.Linear(self._d_model, self._d_ffn),
             nn.ReLU(),
             nn.Linear(self._d_ffn, num_poses * StateSE2Index.size()),
         )
+    
+    def norm_odo(self, odo_info_fut): # odo_info_fut ([64, 20, 8, 2])
+        odo_info_fut_x = odo_info_fut[..., 0:1] # ([64, 20, 8, 1])
+        odo_info_fut_y = odo_info_fut[..., 1:2] # ([64, 20, 8, 1]) 
+        odo_info_fut_head = odo_info_fut[..., 2:3] # ([64, 20, 8, 0])
 
-    def forward(self, object_queries) -> Dict[str, torch.Tensor]:
+        odo_info_fut_x = 2*(odo_info_fut_x + 1.2)/56.9 -1
+        odo_info_fut_y = 2*(odo_info_fut_y + 20)/46 -1
+        odo_info_fut_head = 2*(odo_info_fut_head + 2)/3.9 -1
+        return torch.cat([odo_info_fut_x, odo_info_fut_y, odo_info_fut_head], dim=-1)
+    
+    def denorm_odo(self, odo_info_fut):
+        odo_info_fut_x = odo_info_fut[..., 0:1]
+        odo_info_fut_y = odo_info_fut[..., 1:2]
+        odo_info_fut_head = odo_info_fut[..., 2:3]
+
+        odo_info_fut_x = (odo_info_fut_x + 1)/2 * 56.9 - 1.2
+        odo_info_fut_y = (odo_info_fut_y + 1)/2 * 46 - 20
+        odo_info_fut_head = (odo_info_fut_head + 1)/2 * 3.9 - 2
+
+    def forward(self, ego_query, targets) -> Dict[str, torch.Tensor]:
         """Torch module forward pass."""
-        poses = self._mlp(object_queries).reshape(-1, self._num_poses, StateSE2Index.size())
-        poses[..., StateSE2Index.HEADING] = poses[..., StateSE2Index.HEADING].tanh() * np.pi
-        return {"trajectory": poses}
+        if self.training:
+            return self.forward_train(ego_query, targets)
+        else:
+            return self.forward_test(ego_query, targets)
+
+
+        # poses = self._mlp(ego_query).reshape(-1, self._num_poses, StateSE2Index.size())
+        # poses[..., StateSE2Index.HEADING] = poses[..., StateSE2Index.HEADING].tanh() * np.pi
+        # return {"trajectory": poses}
+
+    def forward_train(self, ego_query, targets) -> Dict[str, torch.Tensor]:
+        bs = ego_query.shape[0]
+        device = ego_query.device
+        gt_trajs = targets.get('trajectory') # torch.Size([64, 8, 3])
+
+        plan_anchor = gt_trajs[..., :2].to(device)
+        plan_anchor = self.norm_odo(plan_anchor)
+        noise = torch.randn(plan_anchor.shape, device=device)
+        timesteps = torch.randint(
+                0, self.num_train_timesteps,
+                (bs,), device=device
+        )
+        noisy_traj_points = self.diffusion_scheduler.add_noise(
+            original_samples=plan_anchor,
+            noise=noise,
+            timesteps=timesteps,
+        ).float()
+        noisy_traj_points = torch.clamp(noisy_traj_points, min=-1, max=1)
+        noisy_traj_points = self.denorm_odo(noisy_traj_points)
+        noise_pred = self.noise_pred_net(
+                sample=noisy_traj_points,
+                timestep=timesteps,
+                global_cond=global_cond,
+                extra_cond=extra_cond,
+            )
+
+        
+
+    def forward_test(self, ego_query, targets) -> Dict[str, torch.Tensor]:
+
+        pass
+    

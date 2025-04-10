@@ -15,6 +15,8 @@ class TransfuserConfig:
 
     image_architecture: str = "resnet34"
     lidar_architecture: str = "resnet34"
+    bkb_path: str = "/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/diffusiondrive/pytorch_model.bin"
+
 
     latent: bool = False
     latent_rad_thresh: float = 4 * np.pi / 9
@@ -75,6 +77,10 @@ class TransfuserConfig:
 
     # detection
     num_bounding_boxes: int = 30
+
+    num_train_timesteps = 1000
+    num_infer_times = 20
+    diffunet_embed_dims = 256
 
     # loss weights
     trajectory_weight: float = 10.0
