@@ -256,14 +256,14 @@ class TrajectoryHead(nn.Module):
             timesteps=timesteps,
         ).float()
         noisy_traj_points = torch.clamp(noisy_traj_points, min=-1, max=1)
-        noisy_traj_points = self.denorm_odo(noisy_traj_points)
+        # noisy_traj_points = self.denorm_odo(noisy_traj_points)
         noise_pred = self.noise_pred_net(
                 sample=noisy_traj_points,
                 timestep=timesteps,
-                global_cond=global_cond,
-                extra_cond=extra_cond,
+                global_cond=None,
+                extra_cond=None,
             )
-
+        return {"trajectory":noise_pred}
         
 
     def forward_test(self, ego_query, targets) -> Dict[str, torch.Tensor]:

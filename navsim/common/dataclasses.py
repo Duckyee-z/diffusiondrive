@@ -293,9 +293,9 @@ class Scene:
         """
 
         if num_trajectory_frames is None:
-            num_trajectory_frames = self.scene_metadata.num_future_frames
+            num_trajectory_frames = self.scene_metadata.num_future_frames # 10
 
-        start_frame_idx = self.scene_metadata.num_history_frames - 1
+        start_frame_idx = self.scene_metadata.num_history_frames - 1 # 
 
         global_ego_poses = []
         for frame_idx in range(start_frame_idx, start_frame_idx + num_trajectory_frames + 1):

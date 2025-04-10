@@ -408,7 +408,9 @@ class TrajectoryHead(nn.Module):
             prediction_type="sample",
         )
 
-        self.sampling_timesteps = config.sampling_timesteps
+        # self.sampling_timesteps = config.sampling_timesteps
+
+        self.infer_step_num = config.infer_step_num
         # plan_anchor = np.load(plan_anchor_path)
 
         # self.plan_anchor = nn.Parameter(
@@ -499,7 +501,7 @@ class TrajectoryHead(nn.Module):
         trajectory_loss_dict = {}
         ret_traj_loss = 0
         for idx, (poses_reg, poses_cls) in enumerate(zip(poses_reg_list, poses_cls_list)):
-            trajectory_loss = self.loss_computer(poses_reg, poses_cls, targets, plan_anchor)
+            trajectory_loss = self.loss_computer(poses_reg, poses_cls, targets, noisy_traj_points)
             trajectory_loss_dict[f"trajectory_loss_{idx}"] = trajectory_loss
             ret_traj_loss += trajectory_loss
 
@@ -512,12 +514,16 @@ class TrajectoryHead(nn.Module):
 
         bs = ego_query.shape[0]
         device = ego_query.device
-        self.diffusion_scheduler.set_timesteps(1000, device)
         n_trajs = self.n_trajs
+        # self.diffusion_scheduler.set_timesteps(1000, device)
 
-        times = torch.linspace(-1, 1000-1, steps=self.sampling_timesteps + 1)
-        times = list(reversed(times.int().tolist()))
-        sample_timesteps = torch.tensor(times).to(device)
+        self.diffusion_scheduler.set_timesteps(self.infer_step_num, device)
+        denoise_steps = list(range(0, self.infer_step_num))
+
+
+        # times = torch.linspace(-1, 1000-1, steps=self.sampling_timesteps + 1)
+        # times = list(reversed(times.int().tolist()))
+        # sample_timesteps = torch.tensor(times).to(device)
 
         # 1. add noise to the plan anchor
         plan_anchor = torch.randn((bs,n_trajs, 8, 2)).to(device)
@@ -525,9 +531,9 @@ class TrajectoryHead(nn.Module):
         # noise = torch.randn(img.shape, device=device)
         # noisy_trajs = self.denorm_odo(img)
         ego_fut_mode = img.shape[1]
-        for k in sample_timesteps[:]:
-            if k == -1:
-                continue
+        for step_idx in denoise_steps:
+            k = self.diffusion_scheduler.timesteps[:][step_idx]
+            
             x_boxes = torch.clamp(img, min=-1, max=1)
             noisy_traj_points = self.denorm_odo(x_boxes)
 
