@@ -56,7 +56,19 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
         worker=ray_distributed \
         "agent.checkpoint_path=$escaped_path"\
         metric_cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/metric_cache/" \
-        experiment_name=${agent_name}_eval
+        experiment_name=${agent_name}_eval_step20
+
+rm $NAVSIM_DEVKIT_ROOT/navsim/agents/vdiffusiondrivev2/transfuser_config.py
+
+mv $NAVSIM_DEVKIT_ROOT/navsim/agents/vdiffusiondrivev2/transfuser_config_step2.py $NAVSIM_DEVKIT_ROOT/navsim/agents/vdiffusiondrivev2/transfuser_config.py
+
+python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+        train_test_split=navtest \
+        agent=$agent_name \
+        worker=ray_distributed \
+        "agent.checkpoint_path=$escaped_path"\
+        metric_cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/metric_cache/" \
+        experiment_name=${agent_name}_eval_step2
 
 
 # aidi-inf-cli job submit -f EDA.yaml -t ~/temp_dir

@@ -118,9 +118,7 @@ class LossComputer(nn.Module):
     def __init__(self,config: TransfuserConfig):
         self._config = config
         super(LossComputer, self).__init__()
-        # self.focal_loss = FocalLoss(use_sigmoid=True, gamma=2.0, alpha=0.25, reduction='mean', loss_weight=1.0, activated=False)
-        self.cls_loss_weight = config.trajectory_cls_weight
-        self.reg_loss_weight = config.trajectory_reg_weight
+
     def forward(self, poses_reg, poses_cls, targets, plan_anchor):
         """
         pred_traj: (bs, 20, 8, 3)
@@ -144,16 +142,6 @@ class LossComputer(nn.Module):
                                             device=poses_cls.device)
         target_classes_onehot.scatter_(1, cls_target.unsqueeze(1), 1)
 
-        # Use py_sigmoid_focal_loss function for focal loss calculation
-        loss_cls = self.cls_loss_weight * py_sigmoid_focal_loss(
-            poses_cls,
-            target_classes_onehot,
-            weight=None,
-            gamma=2.0,
-            alpha=0.25,
-            reduction='mean',
-            avg_factor=None
-        )
 
         # Calculate regression loss
         reg_loss = self.reg_loss_weight * F.l1_loss(best_reg, target_traj)
