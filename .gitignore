@@ -6,3 +6,4 @@ tb_logs/
 *.pkl
 *.png
 diffusiondrive.yaml
+*.ipynb
