@@ -437,6 +437,7 @@ class TrajectoryHead(nn.Module):
         self.diff_decoder = CustomTransformerDecoder(diff_decoder_layer, 2)
 
         self.loss_computer = LossComputer(config)
+
     def norm_odo(self, odo_info_fut): # odo_info_fut ([64, 20, 8, 2])
         odo_info_fut_x = odo_info_fut[..., 0:1] # ([64, 20, 8, 1])
         odo_info_fut_y = odo_info_fut[..., 1:2] # ([64, 20, 8, 1]) 
@@ -475,7 +476,7 @@ class TrajectoryHead(nn.Module):
         timesteps = torch.randint(
             0, 1000,
             (bs,), device=device
-        )
+        ) # TODO: ADD TRAJ DIM
         noise = torch.randn(odo_info_fut.shape, device=device)
         noisy_traj_points = self.diffusion_scheduler.add_noise(
             original_samples=odo_info_fut,
@@ -520,16 +521,11 @@ class TrajectoryHead(nn.Module):
         self.diffusion_scheduler.set_timesteps(self.infer_step_num, device)
         denoise_steps = list(range(0, self.infer_step_num))
 
-
-        # times = torch.linspace(-1, 1000-1, steps=self.sampling_timesteps + 1)
-        # times = list(reversed(times.int().tolist()))
-        # sample_timesteps = torch.tensor(times).to(device)
-
         # 1. add noise to the plan anchor
         plan_anchor = torch.randn((bs,n_trajs, 8, 2)).to(device)
         img = self.norm_odo(plan_anchor)
         # noise = torch.randn(img.shape, device=device)
-        # noisy_trajs = self.denorm_odo(img)
+        # noisy_trajs = self.denorm_odo(img) 
         ego_fut_mode = img.shape[1]
         for step_idx in denoise_steps:
             k = self.diffusion_scheduler.timesteps[:][step_idx]
