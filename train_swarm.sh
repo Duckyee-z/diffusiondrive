@@ -34,7 +34,7 @@ pip install -e . -i https://art-internal.hobot.cc/artifactory/api/pypi/pypi/simp
 
 # python navsim/planning/script/run_metric_caching.py train_test_split=navtest cache.cache_path=$NAVSIM_EXP_ROOT/metric_cache
 # agent_name=vanilla_diffusiondrive_agent
-agent_name=vdiffusiondrivev2
+agent_name=vdiffusiondrivev2_minmaxnorm
 
 
 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
@@ -58,9 +58,9 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
         metric_cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/metric_cache/" \
         experiment_name=${agent_name}_eval_step20
 
-rm $NAVSIM_DEVKIT_ROOT/navsim/agents/vdiffusiondrivev2/transfuser_config.py
+rm $NAVSIM_DEVKIT_ROOT/navsim/agents/$agent_name/transfuser_config.py
 
-mv $NAVSIM_DEVKIT_ROOT/navsim/agents/vdiffusiondrivev2/transfuser_config_step2.py $NAVSIM_DEVKIT_ROOT/navsim/agents/vdiffusiondrivev2/transfuser_config.py
+mv $NAVSIM_DEVKIT_ROOT/navsim/agents/$agent_name/transfuser_config_step2.py $NAVSIM_DEVKIT_ROOT/navsim/agents/$agent_name/transfuser_config.py
 
 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
         train_test_split=navtest \
