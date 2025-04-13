@@ -37,6 +37,8 @@ pip install -e . -i https://art-internal.hobot.cc/artifactory/api/pypi/pypi/simp
 agent_name=vdiffusiondrivev2
 
 
+
+
 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         agent=$agent_name \
         experiment_name=${agent_name} \
@@ -45,7 +47,6 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/training_cache/" \
         use_cache_without_dataset=True  \
         force_cache_computation=False 
-
 ckpt_path=$(find $NAVSIM_EXP_ROOT/ -type f -name '*.ckpt')
 # echo $ckpt_path
 escaped_path=${ckpt_path//=/\\=}
@@ -56,7 +57,19 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
         worker=ray_distributed \
         "agent.checkpoint_path=$escaped_path"\
         metric_cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/metric_cache/" \
-        experiment_name=${agent_name}_eval
+        experiment_name=${agent_name}_eval_step20
+
+rm $NAVSIM_DEVKIT_ROOT/navsim/agents/$agent_name/transfuser_config.py
+
+mv $NAVSIM_DEVKIT_ROOT/navsim/agents/$agent_name/transfuser_config_step2.py $NAVSIM_DEVKIT_ROOT/navsim/agents/$agent_name/transfuser_config.py
+
+python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+        train_test_split=navtest \
+        agent=$agent_name \
+        worker=ray_distributed \
+        "agent.checkpoint_path=$escaped_path"\
+        metric_cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/metric_cache/" \
+        experiment_name=${agent_name}_eval_step2
 
 
 # aidi-inf-cli job submit -f EDA.yaml -t ~/temp_dir
