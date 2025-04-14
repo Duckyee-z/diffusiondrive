@@ -5,3 +5,5 @@ tb_logs/
 *.gif
 *.pkl
 *.png
+diffusiondrive.yaml
+train_swarm.sh

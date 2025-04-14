@@ -34,7 +34,7 @@ pip install -e . -i https://art-internal.hobot.cc/artifactory/api/pypi/pypi/simp
 
 # python navsim/planning/script/run_metric_caching.py train_test_split=navtest cache.cache_path=$NAVSIM_EXP_ROOT/metric_cache
 # agent_name=vanilla_diffusiondrive_agent
-agent_name=vdiffusiondrivev2
+agent_name=vdiffusiondrivev2_minmaxnorm
 
 
 
