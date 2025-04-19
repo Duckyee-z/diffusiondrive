@@ -52,12 +52,13 @@ class CacheOnlyDataset(torch.utils.data.Dataset):
         self._cache_path = Path(cache_path)
     
         if log_names is not None:
-            if debug:
-                self.log_names = [Path(log_name) for log_name in log_names[:8] if (self._cache_path / log_name).is_dir()]
-            else:
-                self.log_names = [Path(log_name) for log_name in log_names if (self._cache_path / log_name).is_dir()]
+            self.log_names = [Path(log_name) for log_name in log_names if (self._cache_path / log_name).is_dir()]
         else:
             self.log_names = [log_name for log_name in self._cache_path.iterdir()]
+
+        if debug:
+            self.log_names = self.log_names[:16]
+
 
         self._feature_builders = feature_builders
         self._target_builders = target_builders
@@ -113,26 +114,26 @@ class CacheOnlyDataset(torch.utils.data.Dataset):
 
         return valid_cache_paths
     
-    # @staticmethod
-    def _load_valid_tokens_by_log_name(
-        self,
-        log_name: Path,
-    ) -> List[str]:
-        """
-        Helper method to load valid cache paths.
-        :param cache_path: directory of training cache folder
-        :param feature_builders: list of feature builders
-        :param target_builders: list of target builders
-        :param log_names: list of log paths to load
-        :return: dictionary of tokens and sample paths as keys / values
-        """
-        cache_path = self._cache_path
-        log_path = cache_path / log_name
-        valid_tokens_list = []
-        for token_path in log_path.iterdir():
-            valid_tokens_list.append(token_path.name)
+    # # @staticmethod
+    # def _load_valid_tokens_by_log_name(
+    #     self,
+    #     log_name: Path,
+    # ) -> List[str]:
+    #     """
+    #     Helper method to load valid cache paths.
+    #     :param cache_path: directory of training cache folder
+    #     :param feature_builders: list of feature builders
+    #     :param target_builders: list of target builders
+    #     :param log_names: list of log paths to load
+    #     :return: dictionary of tokens and sample paths as keys / values
+    #     """
+    #     cache_path = self._cache_path
+    #     log_path = cache_path / log_name
+    #     valid_tokens_list = []
+    #     for token_path in log_path.iterdir():
+    #         valid_tokens_list.append(token_path.name)
 
-        return valid_tokens_list
+    #     return valid_tokens_list
     
 
     def _load_scene_with_token(self, token: str) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:

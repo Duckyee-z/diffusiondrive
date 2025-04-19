@@ -1,12 +1,23 @@
 agent_name=vdiffusiondrivev2
 
-CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_myvisual.py \
+# CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_myvisual.py \
+#         agent=$agent_name \
+#         experiment_name=$agent_name\
+#         train_test_split=navtrain  \
+#         split=trainval   \
+#         trainer.params.max_epochs=2 \
+#         debug=true
+
+CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_data_analyse_ho.py \
         agent=$agent_name \
         experiment_name=$agent_name\
         train_test_split=navtrain  \
         split=trainval   \
         trainer.params.max_epochs=2 \
-        debug=true
+        cache_path=/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/training_cache_HO/ \
+        use_cache_without_dataset=True \
+        force_cache_computation=False 
+        # debug=true
 
 # ckpt_path=$(find $NAVSIM_EXP_ROOT/$agent_name -type f -name '*.ckpt')
 # echo $ckpt_path
