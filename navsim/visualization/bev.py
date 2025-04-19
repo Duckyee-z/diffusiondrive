@@ -160,6 +160,7 @@ def add_trajectory_to_bev_ax(ax: plt.Axes, trajectory: Trajectory, config: Dict[
     :param config: dictionary with plot parameters
     :return: ax with plot
     """
+    # print(trajectory.poses.shape)
     poses = np.concatenate([np.array([[0, 0]]), trajectory.poses[:, :2]])
     ax.plot(
         poses[:, 1],
@@ -172,6 +173,32 @@ def add_trajectory_to_bev_ax(ax: plt.Axes, trajectory: Trajectory, config: Dict[
         markersize=config["marker_size"],
         markeredgecolor=config["marker_edge_color"],
         zorder=config["zorder"],
+        label=config.get("legend_label", "Trajectory")
+    )
+    return ax
+
+def add_trajectory_to_bev_ax_numpy(ax: plt.Axes, trajectory, config: Dict[str, Any]) -> plt.Axes:
+    """
+    Add trajectory poses as lint to plot
+    :param ax: matplotlib ax object
+    :param trajectory: navsim trajectory dataclass
+    :param config: dictionary with plot parameters
+    :return: ax with plot
+    """
+    # print(trajectory.poses.shape)
+    poses = np.concatenate([np.array([[0, 0]]), trajectory[:, :2]])
+    ax.plot(
+        poses[:, 1],
+        poses[:, 0],
+        color=config["line_color"],
+        alpha=config["line_color_alpha"],
+        linewidth=config["line_width"],
+        linestyle=config["line_style"],
+        marker=config["marker"],
+        markersize=config["marker_size"],
+        markeredgecolor=config["marker_edge_color"],
+        zorder=config["zorder"],
+        label=config.get("legend_label", "Trajectory")
     )
     return ax
 

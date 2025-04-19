@@ -152,7 +152,7 @@ class V2TransfuserModel(nn.Module):
 
         output: Dict[str, torch.Tensor] = {"bev_semantic_map": bev_semantic_map}
 
-        trajectory = self._trajectory_head(trajectory_query,agents_query, cross_bev_feature,bev_spatial_shape,status_encoding[:, None],targets=targets,global_img=None)
+        trajectory = self._trajectory_head(trajectory_query, agents_query, cross_bev_feature, bev_spatial_shape, status_encoding[:, None], status_feature, targets=targets, global_img=None)
         output.update(trajectory) # 轨迹预测
 
         agents = self._agent_head(agents_query) # BEV目标检测
@@ -429,6 +429,8 @@ class TrajectoryHead(nn.Module):
         )
 
         self.infer_step_num = config.infer_step_num
+        self.trailing_mode = config.trailing_mode
+        self.zero_infer = config.zero_infer
 
         self.plan_anchor_encoder = nn.Sequential(
             *linear_relu_ln(d_model, 1, 1,512),
@@ -487,19 +489,27 @@ class TrajectoryHead(nn.Module):
 
         return denormed_odo_info_fut
     
-    def forward(self, ego_query, agents_query, bev_feature,bev_spatial_shape,status_encoding, targets=None,global_img=None) -> Dict[str, torch.Tensor]:
+    def forward(self, ego_query, agents_query, bev_feature,bev_spatial_shape,status_encoding, status_feature, targets=None, global_img=None) -> Dict[str, torch.Tensor]:
         """Torch module forward pass."""
         if self.training:
-            return self.forward_train(ego_query, agents_query, bev_feature,bev_spatial_shape,status_encoding,targets,global_img)
+            return self.forward_train(ego_query, agents_query, bev_feature,bev_spatial_shape, status_encoding, status_feature, targets, global_img)
         else:
-            return self.forward_test(ego_query, agents_query, bev_feature,bev_spatial_shape,status_encoding,global_img)
+            if self.trailing_mode:
+                return self.forward_test_trailing_mode(ego_query, agents_query, bev_feature, bev_spatial_shape, status_encoding, status_feature,global_img)
+            return self.forward_test(ego_query, agents_query, bev_feature, bev_spatial_shape, status_encoding, status_feature, global_img)
 
 
-    def forward_train(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding, targets=None,global_img=None) -> Dict[str, torch.Tensor]:
+    def forward_train(self, ego_query, agents_query, bev_feature, bev_spatial_shape, status_encoding, status_feature, targets=None, global_img=None) -> Dict[str, torch.Tensor]:
         bs = ego_query.shape[0]
         device = ego_query.device
         # 1. add truncated noise to the plan anchor
         gt_trajs = targets.get('trajectory') # torch.Size([64, 8, 3])
+        velocity = targets.get('velocity') # torch.Size([64, 8, 2])
+        acceleration = targets.get('acceleration') # torch.Size([64, 8, 2])
+
+        # status_feature [driving_command, ego_velocity, ego_acceleration] = [_, _, _, _, vx, vy, ax, ay]
+        velo_now = status_feature[..., 4:6] # torch.Size([64, 2])
+        acc_now = status_feature[..., 6:8] # torch.Size([64, 2])
         
         stacked_gt_trajs = gt_trajs[...,:2].unsqueeze(1).repeat(1, self.n_trajs, 1, 1).reshape(bs * self.n_trajs, 8, 2).to(device)
         stacked_gt_trajs = stacked_gt_trajs.unsqueeze(1) # torch.Size([1280, 1, 8, 2])
@@ -539,14 +549,14 @@ class TrajectoryHead(nn.Module):
         for idx, pose_reg in enumerate(poses_reg_list):
             # trajectory_loss == diffusion loss, i.e, pred x0 in diffusion
             trajectory_loss_idx = F.l1_loss(pose_reg, # pred
-                                            torch.stack([gt_trajs] * self.n_trajs, dim=1) # gt
-                                            ) 
+                                            torch.stack([gt_trajs] * self.n_trajs, dim=1)# gt
+                                            )
             trajectory_loss += trajectory_loss_idx
             trajectory_loss_dict[f"trajectory_loss_{idx}"] = trajectory_loss_idx
 
         return {"trajectory": poses_reg_list[-1], "trajectory_loss": trajectory_loss, "trajectory_loss_dict":trajectory_loss_dict}   
 
-    def forward_test(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding,global_img) -> Dict[str, torch.Tensor]:
+    def forward_test(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding, status_feature, global_img) -> Dict[str, torch.Tensor]:
 
         bs = ego_query.shape[0]
         device = ego_query.device
@@ -598,3 +608,63 @@ class TrajectoryHead(nn.Module):
             ).prev_sample
 
         return {"trajectory": poses_reg.squeeze(1)}
+    
+    
+    def forward_test_trailing_mode(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding,global_img) -> Dict[str, torch.Tensor]:
+        bs = ego_query.shape[0]
+        device = ego_query.device
+        # n_trajs = self.n_trajs
+        # self.diffusion_scheduler.set_timesteps(1000, device)
+
+        self.diffusion_scheduler.set_timesteps(self.infer_step_num, device)
+        times = torch.linspace(-1, 1000-1, steps=self.infer_step_num + 1)
+        times = list(reversed(times.int().tolist()))
+        sample_timesteps = torch.tensor(times).to(device)
+
+        # 1. add noise to the plan anchor
+        stacked_gt_trajs = torch.randn((bs, 1, 8, 2)).to(device)
+        if self.zero_infer:
+            stacked_gt_trajs = torch.zeros((bs, 1, 8, 2)).to(device)
+        img = self.norm_odo(stacked_gt_trajs)
+        # noise = torch.randn(img.shape, device=device)
+        # noisy_trajs = self.denorm_odo(img) 
+        ego_fut_mode = img.shape[1]
+        for k in sample_timesteps[:]:
+            if k == -1 : continue
+            
+            x_boxes = torch.clamp(img, min=-1, max=1)
+            noisy_traj_points = self.denorm_odo(x_boxes)
+
+            # 2. proj noisy_traj_points to the query
+            traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64)
+            traj_pos_embed = traj_pos_embed.flatten(-2)
+            traj_feature = self.plan_anchor_encoder(traj_pos_embed)
+            traj_feature = traj_feature.view(bs,ego_fut_mode,-1)
+
+            timesteps = k
+            if not torch.is_tensor(timesteps):
+                # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
+                timesteps = torch.tensor([timesteps], dtype=torch.long, device=img.device)
+            elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+                timesteps = timesteps[None].to(img.device)
+            
+            # 3. embed the timesteps
+            timesteps = timesteps.expand(img.shape[0])
+            time_embed = self.time_mlp(timesteps)
+            time_embed = time_embed.view(bs,1,-1)
+
+            # 4. begin the stacked decoder
+            poses_reg_list = self.diff_decoder(traj_feature, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding,global_img)
+            poses_reg = poses_reg_list[-1]
+            x_start = poses_reg[...,:2]
+            x_start = self.norm_odo(x_start)
+            img = self.diffusion_scheduler.step(
+                model_output=x_start,
+                timestep=k,
+                sample=img
+            ).prev_sample
+
+        return {"trajectory": poses_reg.squeeze(1)}
+    
+
+    

@@ -298,13 +298,13 @@ class Scene:
         start_frame_idx = self.scene_metadata.num_history_frames - 1 # 
 
         global_ego_poses = []
-        for frame_idx in range(start_frame_idx, start_frame_idx + num_trajectory_frames + 1):
+        for frame_idx in range(start_frame_idx, start_frame_idx + num_trajectory_frames + 1): # 3， 3+11 = 14 
             global_ego_poses.append(self.frames[frame_idx].ego_status.ego_pose)
-
+         # len(global_ego_poses) = 9
         local_ego_poses = convert_absolute_to_relative_se2_array(
             StateSE2(*global_ego_poses[0]), np.array(global_ego_poses[1:], dtype=np.float64)
         )
-
+        # len(local_ego_poses) = 8 global_ego_poses[0]作为基准计算相对坐标
         return Trajectory(
             local_ego_poses,
             TrajectorySampling(

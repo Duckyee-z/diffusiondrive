@@ -11,7 +11,7 @@ defaults:
   - default_common
   - default_evaluation
   - default_train_val_test_log_split
-  - agent: ego_status_mlp_agent
+  - agent: vdiffusiondrivev2
   - _self_
 
 split: trainval

@@ -131,6 +131,20 @@ class TransfuserTargetBuilder(AbstractTargetBuilder):
     def get_unique_name(self) -> str:
         """Inherited, see superclass."""
         return "transfuser_target"
+    
+    def get_velo_accel(self, scene: Scene, start_frame_idx, num_frames) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Inherited, see superclass."""
+        # velocity_list = []
+        # acceleration_list = []
+        velocity_list = []
+        acceleration_list = []
+        for frame_idx in range(start_frame_idx + 1, start_frame_idx + num_frames + 1):
+            velocity_list.append(scene.frames[frame_idx].ego_status.ego_velocity)
+            acceleration_list.append(scene.frames[frame_idx].ego_status.ego_acceleration) 
+        velocity = torch.tensor(np.array(velocity_list), dtype=torch.float32)
+        acceleration = torch.tensor(np.array(acceleration_list), dtype=torch.float32)
+
+        return (velocity, acceleration)
 
     def compute_targets(self, scene: Scene) -> Dict[str, torch.Tensor]:
         """Inherited, see superclass."""
@@ -141,15 +155,18 @@ class TransfuserTargetBuilder(AbstractTargetBuilder):
         frame_idx = scene.scene_metadata.num_history_frames - 1
         annotations = scene.frames[frame_idx].annotations
         ego_pose = StateSE2(*scene.frames[frame_idx].ego_status.ego_pose)
-
         agent_states, agent_labels = self._compute_agent_targets(annotations)
         bev_semantic_map = self._compute_bev_semantic_map(annotations, scene.map_api, ego_pose)
+
+        velocity, acceleration = self.get_velo_accel(scene, frame_idx, self._config.trajectory_sampling.num_poses)
 
         return {
             "trajectory": trajectory,
             "agent_states": agent_states,
             "agent_labels": agent_labels,
             "bev_semantic_map": bev_semantic_map,
+            "velocity": velocity,
+            "acceleration": acceleration,
         }
 
     def _compute_agent_targets(self, annotations: Annotations) -> Tuple[torch.Tensor, torch.Tensor]:

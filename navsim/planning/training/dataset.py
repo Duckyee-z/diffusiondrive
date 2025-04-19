@@ -8,6 +8,7 @@ import os
 import torch
 from tqdm import tqdm
 
+from navsim.common.dataclasses import Scene
 from navsim.common.dataloader import SceneLoader
 from navsim.planning.training.abstract_feature_target_builder import AbstractFeatureBuilder, AbstractTargetBuilder
 
@@ -49,15 +50,14 @@ class CacheOnlyDataset(torch.utils.data.Dataset):
         super().__init__()
         assert Path(cache_path).is_dir(), f"Cache path {cache_path} does not exist!"
         self._cache_path = Path(cache_path)
-
+    
         if log_names is not None:
-            self.log_names = [Path(log_name) for log_name in log_names if (self._cache_path / log_name).is_dir()]
+            if debug:
+                self.log_names = [Path(log_name) for log_name in log_names[:8] if (self._cache_path / log_name).is_dir()]
+            else:
+                self.log_names = [Path(log_name) for log_name in log_names if (self._cache_path / log_name).is_dir()]
         else:
             self.log_names = [log_name for log_name in self._cache_path.iterdir()]
-
-        if debug:
-            self.log_names = self.log_names[:8]
-
 
         self._feature_builders = feature_builders
         self._target_builders = target_builders
@@ -112,6 +112,28 @@ class CacheOnlyDataset(torch.utils.data.Dataset):
                     valid_cache_paths[token_path.name] = token_path
 
         return valid_cache_paths
+    
+    # @staticmethod
+    def _load_valid_tokens_by_log_name(
+        self,
+        log_name: Path,
+    ) -> List[str]:
+        """
+        Helper method to load valid cache paths.
+        :param cache_path: directory of training cache folder
+        :param feature_builders: list of feature builders
+        :param target_builders: list of target builders
+        :param log_names: list of log paths to load
+        :return: dictionary of tokens and sample paths as keys / values
+        """
+        cache_path = self._cache_path
+        log_path = cache_path / log_name
+        valid_tokens_list = []
+        for token_path in log_path.iterdir():
+            valid_tokens_list.append(token_path.name)
+
+        return valid_tokens_list
+    
 
     def _load_scene_with_token(self, token: str) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
         """
@@ -188,6 +210,23 @@ class Dataset(torch.utils.data.Dataset):
 
         return valid_cache_paths
 
+    def _get_scene_with_token(self, token: str) -> Tuple[Scene, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        """
+        Helper function to compute feature / targets and save in cache.
+        :param token: unique identifier of scene to cache
+        """
+        features: Dict[str, torch.Tensor] = {}
+        targets: Dict[str, torch.Tensor] = {}
+        scene = self._scene_loader.get_scene_from_token(token)
+        agent_input = scene.get_agent_input()
+        for builder in self._feature_builders:
+            features.update(builder.compute_features(agent_input))
+        for builder in self._target_builders:
+            targets.update(builder.compute_targets(scene))
+
+        return (scene, features, targets)
+
+ 
     def _cache_scene_with_token(self, token: str) -> None:
         """
         Helper function to compute feature / targets and save in cache.
