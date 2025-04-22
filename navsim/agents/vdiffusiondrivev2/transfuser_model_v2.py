@@ -525,7 +525,7 @@ class TrajectoryHead(nn.Module):
             timesteps=timesteps,
         ).float()
         # import ipdb; ipdb.set_trace()
-        noisy_traj_points = torch.clamp(noisy_traj_points, min=-1, max=1)
+        # noisy_traj_points = torch.clamp(noisy_traj_points, min=-1, max=1)
         noisy_traj_points = self.denorm_odo(noisy_traj_points)
 
         noisy_traj_points = noisy_traj_points.view(bs, self.n_trajs, 8, 2) # torch.Size([64, 20, 8, 2])
@@ -574,8 +574,8 @@ class TrajectoryHead(nn.Module):
         ego_fut_mode = img.shape[1]
         for step_idx in denoise_steps:
             k = self.diffusion_scheduler.timesteps[:][step_idx]
-            
-            x_boxes = torch.clamp(img, min=-1, max=1)
+            x_boxes = img
+            # x_boxes = torch.clamp(img, min=-1, max=1)
             noisy_traj_points = self.denorm_odo(x_boxes)
 
             # 2. proj noisy_traj_points to the query

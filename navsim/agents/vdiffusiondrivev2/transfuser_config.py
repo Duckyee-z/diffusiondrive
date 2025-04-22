@@ -86,7 +86,7 @@ class TransfuserConfig:
     
     infer_step_num: int = 20
     trailing_mode: bool = False
-    zero_infer: bool = True
+    zero_infer: bool = False
 
     agent_class_weight: float = 10.0
     agent_box_weight: float = 1.0

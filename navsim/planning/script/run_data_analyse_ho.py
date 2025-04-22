@@ -55,17 +55,17 @@ def main(cfg: DictConfig) -> None:
             log_names=cfg.train_logs,
             debug=cfg.debug
         )
-        val_data = CacheOnlyDataset(
-            cache_path=cfg.cache_path,
-            feature_builders=agent.get_feature_builders(),
-            target_builders=agent.get_target_builders(),
-            log_names=cfg.val_logs,
-            debug=cfg.debug
-        )
+        # val_data = CacheOnlyDataset(
+        #     cache_path=cfg.cache_path,
+        #     feature_builders=agent.get_feature_builders(),
+        #     target_builders=agent.get_target_builders(),
+        #     log_names=cfg.val_logs,
+        #     debug=cfg.debug
+        # )
     logger.info("Building Datasets")
 
-    val_dataloader = DataLoader(val_data, **cfg.dataloader.params, shuffle=False)
-    logger.info("Num validation samples: %d", len(val_data))
+    # val_dataloader = DataLoader(val_data, **cfg.dataloader.params, shuffle=False)
+    # logger.info("Num validation samples: %d", len(val_data))
 
     train_dataloader = DataLoader(train_data, **cfg.dataloader.params, shuffle=True)
     logger.info("Num training samples: %d", len(train_data))
@@ -93,33 +93,33 @@ def main(cfg: DictConfig) -> None:
         train_velo=train_velo_np
     )
     import pickle
-    with open("./tb_logs/train_ho.pkl", "wb") as f:
+    with open("./tb_logs/train_ho2.pkl", "wb") as f:
         pickle.dump(train_dict, f)
 
 
-    val_acc = []
-    val_velo = []
+    # val_acc = []
+    # val_velo = []
     
-    for it, batch in enumerate(tqdm(val_dataloader)):
-        # print(it)
-        features, targets = batch
+    # for it, batch in enumerate(tqdm(val_dataloader)):
+    #     # print(it)
+    #     features, targets = batch
 
-        velocity = targets.get('velocity').numpy() # torch.Size([64, 8, 2]) 
-        acceleration = targets.get('acceleration').numpy() # torch.Size([64, 8, 2])
+    #     velocity = targets.get('velocity').numpy() # torch.Size([64, 8, 2]) 
+    #     acceleration = targets.get('acceleration').numpy() # torch.Size([64, 8, 2])
 
-        val_acc.append(acceleration)
-        val_velo.append(velocity)
+    #     val_acc.append(acceleration)
+    #     val_velo.append(velocity)
 
-    val_acc_np, val_velo_np = np.concatenate(val_acc, axis=0), np.concatenate(val_velo, axis=0)
-    print(val_acc_np.shape, val_velo_np.shape)
+    # val_acc_np, val_velo_np = np.concatenate(val_acc, axis=0), np.concatenate(val_velo, axis=0)
+    # print(val_acc_np.shape, val_velo_np.shape)
 
 
-    val_dict = dict(
-        val_acc=val_acc_np,
-        val_velo=val_velo_np
-    )
-    with open("./tb_logs/val_ho.pkl", "wb") as f:
-        pickle.dump(val_dict, f)
+    # val_dict = dict(
+    #     val_acc=val_acc_np,
+    #     val_velo=val_velo_np
+    # )
+    # with open("./tb_logs/val_ho.pkl", "wb") as f:
+    #     pickle.dump(val_dict, f)
 
 
     # logger.info("Starting Training")
