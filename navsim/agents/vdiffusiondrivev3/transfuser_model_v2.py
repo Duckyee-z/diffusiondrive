@@ -3,21 +3,20 @@ import numpy as np
 import torch
 import torch.nn as nn
 import copy
-from navsim.agents.vddrive_ho.transfuser_config import TransfuserConfig
-from navsim.agents.vddrive_ho.transfuser_backbone import TransfuserBackbone
-from navsim.agents.vddrive_ho.transfuser_features import BoundingBox2DIndex
+from navsim.agents.vdiffusiondrivev3.transfuser_config import TransfuserConfig
+from navsim.agents.vdiffusiondrivev3.transfuser_backbone import TransfuserBackbone
+from navsim.agents.vdiffusiondrivev3.transfuser_features import BoundingBox2DIndex
 from navsim.common.enums import StateSE2Index
 from diffusers.schedulers import DDIMScheduler
-from navsim.agents.vddrive_ho.modules.conditional_unet1d import ConditionalUnet1D,SinusoidalPosEmb
+from navsim.agents.vdiffusiondrivev3.modules.conditional_unet1d import ConditionalUnet1D,SinusoidalPosEmb
 import torch.nn.functional as F
-from navsim.agents.vddrive_ho.modules.blocks import linear_relu_ln, bias_init_with_prob, gen_sineembed_for_position, GridSampleCrossBEVAttention
-from navsim.agents.vddrive_ho.modules.multimodal_loss import LossComputer
+from navsim.agents.vdiffusiondrivev3.modules.blocks import linear_relu_ln,bias_init_with_prob, gen_sineembed_for_position, GridSampleCrossBEVAttention
+from navsim.agents.vdiffusiondrivev3.modules.multimodal_loss import LossComputer
 from torch.nn import TransformerDecoder,TransformerDecoderLayer
 from typing import Any, List, Dict, Optional, Union
-from navsim.agents.vddrive_ho.vddrive_utils import norm_traj, denorm_traj, high_order_to_trajectory, norm_acc, denorm_acc, norm_velo, denorm_velo
+from navsim.agents.vdiffusiondrivev3.vddrive_utils import norm_traj, denorm_traj
 import logging
 logger = logging.getLogger(__name__)
-
 
 class V2TransfuserModel(nn.Module):
     """Torch module for Transfuser."""
@@ -37,9 +36,7 @@ class V2TransfuserModel(nn.Module):
 
         self._config = config
         logger.info(f"HO-VDDrive infer_step_num : {config.infer_step_num}")
-        logger.info(f"HO-VDDrive HO_MODE : {config.HO_MODE}")
-        logger.info(f"HO-VDDrive HO_vel_norm : {config.HO_vel_norm}")
-        logger.info(f"HO-VDDrive HO_acc_norm : {config.HO_acc_norm}")
+        logger.info(f"HO-VDDrive traj_norm : {config.traj_norm}")
         logger.info(f"HO-VDDrive clamp: {config.clamp}")
         self._backbone = TransfuserBackbone(config)
 
@@ -332,7 +329,6 @@ class CustomTransformerDecoderLayer(nn.Module):
                 time_embed, 
                 status_encoding,
                 global_img=None):
-        
         traj_feature = self.cross_bev_attention(traj_feature,noisy_traj_points,bev_feature,bev_spatial_shape)
         traj_feature = traj_feature + self.dropout(self.cross_agent_attention(traj_feature, agents_query,agents_query)[0])
         traj_feature = self.norm1(traj_feature)
@@ -348,7 +344,7 @@ class CustomTransformerDecoderLayer(nn.Module):
         # 4.8 modulate with time steps
         traj_feature = self.time_modulation(traj_feature, time_embed,global_cond=None,global_img=global_img)
         
-        # 4.9 predict the offset & heading bs, 20, 8, 2 高阶量 -》 bs,20,8,2 一个去噪高阶量 + heading
+        # 4.9 predict the offset & heading
         poses_reg = self.task_decoder(traj_feature) #bs,20,8,3; bs,20
         poses_reg[...,:2] = poses_reg[...,:2] + noisy_traj_points
         poses_reg[..., StateSE2Index.HEADING] = poses_reg[..., StateSE2Index.HEADING].tanh() * np.pi
@@ -403,7 +399,7 @@ class TrajectoryHead(nn.Module):
         :param d_model: input dimensionality
         """
         super(TrajectoryHead, self).__init__()
-        print("================= Init vddrive_hov1 ====================")
+        print("================= Init vdiffusiondrivev2.3 ====================")
         self.n_trajs = 20
         self.config = config
 
@@ -412,7 +408,6 @@ class TrajectoryHead(nn.Module):
         self._d_ffn = d_ffn
         self.diff_loss_weight = 2.0
         self.ego_fut_mode = 20
-        self.HO_MODE = config.HO_MODE
 
         self.diffusion_scheduler = DDIMScheduler(
             num_train_timesteps=1000,
@@ -444,7 +439,7 @@ class TrajectoryHead(nn.Module):
         self.diff_decoder = CustomTransformerDecoder(diff_decoder_layer, 2)
 
         self.loss_computer = LossComputer(config)
-
+    
     def forward(self, ego_query, agents_query, bev_feature,bev_spatial_shape,status_encoding, status_feature, targets=None, global_img=None) -> Dict[str, torch.Tensor]:
         """Torch module forward pass."""
         if self.training:
@@ -460,30 +455,21 @@ class TrajectoryHead(nn.Module):
         device = ego_query.device
         # 1. add truncated noise to the plan anchor
         gt_trajs = targets.get('trajectory') # torch.Size([64, 8, 3])
-        velocity = targets.get('velocity') # torch.Size([64, 8, 2])
-        acceleration = targets.get('acceleration') # torch.Size([64, 8, 2])
-
-        # status_feature [driving_command, ego_velocity, ego_acceleration] = [_, _, _, _, vx, vy, ax, ay]
-        velo_ego = status_feature[..., 4:6] # torch.Size([64, 2])
-        acc_ego = status_feature[..., 6:8] # torch.Size([64, 2])
-
-        if self.HO_MODE == "acc":
-            gt_ho = acceleration
-            stacked_gt_acc = acceleration.unsqueeze(1).repeat(1, self.n_trajs, 1, 1).reshape(bs * self.n_trajs, 8, 2).to(device)
-            odo_info_fut = norm_acc(stacked_gt_acc.unsqueeze(1), type=self.config.HO_acc_norm) # torch.Size([1280, 1, 8, 2])
-
-        elif self.HO_MODE == "vel":
-            gt_ho = velocity
-            stacked_gt_velo = velocity.unsqueeze(1).repeat(1, self.n_trajs, 1, 1).reshape(bs * self.n_trajs, 8, 2).to(device)
-            odo_info_fut = norm_velo(stacked_gt_velo.unsqueeze(1), type=self.config.HO_vel_norm)
         
-        # stacked_gt_trajs = gt_trajs[...,:2].unsqueeze(1).repeat(1, self.n_trajs, 1, 1).reshape(bs * self.n_trajs, 8, 2).to(device)
-        # stacked_gt_trajs = stacked_gt_trajs.unsqueeze(1) # torch.Size([1280, 1, 8, 2])
+        stacked_gt_trajs = gt_trajs[...,:2].unsqueeze(1).repeat(1, self.n_trajs, 1, 1).reshape(bs * self.n_trajs, 8, 2).to(device)
+        stacked_gt_trajs = stacked_gt_trajs.unsqueeze(1) # torch.Size([1280, 1, 8, 2])
+        odo_info_fut = norm_traj(stacked_gt_trajs, type=self.config.traj_norm) # torch.Size([1280, 1, 8, 2])
         timesteps = torch.randint(
             0, 1000,
             (bs * self.n_trajs,), device=device
         ) 
-        noise = torch.randn(odo_info_fut.shape, device=device)
+        x_f, y_f = gt_trajs[..., 0:1], gt_trajs[..., 1:2]
+        x_f = torch.where(x_f > 0, 1, -1)
+        y_f = torch.where(y_f > 0, 1, -1)
+        x_noise = torch.rand(x_f.shape, device=device) + x_f * 4 # bias
+        y_noise = torch.rand(y_f.shape, device=device) + y_f * 0.5
+        noise = torch.cat([x_noise, y_noise], dim=-1).unsqueeze(1).repeat(1, self.n_trajs, 1, 1).view(bs * self.n_trajs, 8, 2).unsqueeze(1)
+        # noise = torch.randn(odo_info_fut.shape, device=device)
         noisy_traj_points = self.diffusion_scheduler.add_noise(
             original_samples=odo_info_fut,
             noise=noise,
@@ -491,164 +477,80 @@ class TrajectoryHead(nn.Module):
         ).float()
         # import ipdb; ipdb.set_trace()
         if self.config.clamp:
-            # 3 sigma
-            # noisy_traj_points = torch.clamp(noisy_traj_points, min=-3, max=3)
             noisy_traj_points = torch.clamp(noisy_traj_points, min=-1, max=1)
 
-        if self.HO_MODE == "acc":
-            noisy_traj_points = denorm_acc(noisy_traj_points, type=self.config.HO_acc_norm)
-        elif self.HO_MODE == "vel":
-            noisy_traj_points = denorm_velo(noisy_traj_points, type=self.config.HO_vel_norm)
+        noisy_traj_points = denorm_traj(noisy_traj_points, type=self.config.traj_norm)
 
         noisy_traj_points = noisy_traj_points.view(bs, self.n_trajs, 8, 2) # torch.Size([64, 20, 8, 2])
 
         ego_fut_mode = noisy_traj_points.shape[1] # ego_fut_mode = self.n_trajs
         # 2. proj noisy_traj_points to the query
-        ho_pos_embed = gen_sineembed_for_position(noisy_traj_points, hidden_dim=64) # torch.Size([64, 20, 8, 64])
-        ho_pos_embed = ho_pos_embed.flatten(-2) # torch.Size([64, 20, 8, 512])
-        ho_feature = self.plan_anchor_encoder(ho_pos_embed) # torch.Size([64, 20, 256])
-        ho_feature = ho_feature.view(bs,ego_fut_mode,-1) # torch.Size([64, 20, 256])
+        traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64) # torch.Size([64, 20, 8, 64])
+        traj_pos_embed = traj_pos_embed.flatten(-2) # torch.Size([64, 20, 8, 512])
+        traj_feature = self.plan_anchor_encoder(traj_pos_embed) # torch.Size([64, 20, 256])
+        traj_feature = traj_feature.view(bs,ego_fut_mode,-1) # torch.Size([64, 20, 256])
         # 3. embed the timesteps
         time_embed = self.time_mlp(timesteps) # torch.Size([1280, 256])
         time_embed = time_embed.view(bs,self.n_trajs,-1) # torch.Size([64, 1, 256])
 
         # 4. begin the stacked decoder
-        poses_reg_list = self.diff_decoder(ho_feature, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding,global_img)
+        poses_reg_list = self.diff_decoder(traj_feature, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding,global_img)
 
         # poses_regs = torch.stack(poses_reg_list, dim=0) # torch.Size([64, 20, 8, 3])
-        ho_loss_dict = {}
-        ho_loss = 0
-        trajectory_loss_list = {}
+        trajectory_loss_dict = {}
         trajectory_loss = 0
-        pred_traj_list = []
-        velo_now_x = velo_ego[..., 0]
-        velo_now = torch.stack([velo_now_x, torch.zeros_like(velo_now_x)], dim=-1)
-        for idx, ho_output in enumerate(poses_reg_list):
-            if self.HO_MODE == "acc":
-                pred_traj = high_order_to_trajectory(velocities = ho_output[...,:2], initial_position=None, initial_velocity=velo_now, dt=0.5, order=2) # torch.Size([64, 20, 8, 3])
-            elif self.HO_MODE == "vel":
-                pred_traj = high_order_to_trajectory(velocities = ho_output[...,:2], initial_position=None, initial_velocity=velo_now, dt=0.5, order=1) # torch.Size([64, 20, 8, 3])
-            pred_traj = torch.cat([pred_traj, ho_output[..., StateSE2Index.HEADING].unsqueeze(-1)], dim=-1)
-            pred_traj_list.append(pred_traj)
-            # gennerate the traj from the high order, cal loss between the gt_traj
-            trajectory_loss_idx = F.l1_loss(pred_traj, torch.stack([targets["trajectory"]] * self.n_trajs, dim=1))
+        for idx, pose_reg in enumerate(poses_reg_list):
+            # trajectory_loss == diffusion loss, i.e, pred x0 in diffusion
+            trajectory_loss_idx = F.l1_loss(pose_reg, # pred
+                                            torch.stack([gt_trajs] * self.n_trajs, dim=1)# gt
+                                            )
             trajectory_loss += trajectory_loss_idx
-            trajectory_loss_list[f"trajectory_loss_{idx}"] = trajectory_loss_idx
-            # ho_loss == diffusion loss
-            ho_loss_idx = F.mse_loss(ho_output[...,:2], torch.stack([gt_ho] * self.n_trajs, dim=1))
-            ho_loss += ho_loss_idx
-            ho_loss_dict[f"ho_loss_{idx}"] = ho_loss_idx
+            trajectory_loss_dict[f"trajectory_loss_{idx}"] = trajectory_loss_idx
 
-        pred_traj = pred_traj_list[-1] # torch.Size([64, 20, 8, 3])
-        return {"trajectory":pred_traj, "trajectory_loss": trajectory_loss, "trajectory_loss_list":trajectory_loss_list,  "ho_loss":ho_loss, "ho_loss_dict":ho_loss_dict}   
+        return {"trajectory": poses_reg_list[-1], "trajectory_loss": trajectory_loss, "trajectory_loss_dict":trajectory_loss_dict}   
 
     def forward_test(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding, status_feature, global_img) -> Dict[str, torch.Tensor]:
 
         bs = ego_query.shape[0]
         device = ego_query.device
 
-        # status_feature [driving_command, ego_velocity, ego_acceleration] = [_, _, _, _, vx, vy, ax, ay]
-        velo_ego = status_feature[..., 4:6] # torch.Size([64, 2])
-        acc_ego = status_feature[..., 6:8] # torch.Size([64, 2])
-
         self.diffusion_scheduler.set_timesteps(self.infer_step_num, device)
         denoise_steps = list(range(0, self.infer_step_num))
 
         # 1. add noise to the plan anchor
-        stacked_gt_trajs = torch.randn((bs, 1, 8, 2)).to(device)
-        # img = norm_traj(stacked_gt_trajs)
+        origin_noise = torch.randn((bs, 8, 2)).to(device)
+        noise1 = torch.cat([
+            torch.randn((bs, 8, 1), device=device) + 4,
+            torch.randn((bs, 8, 1), device=device)
+        ], dim=-1)
+        noise2 = torch.cat([
+            torch.randn((bs, 8, 1), device=device) - 4,
+            torch.randn((bs, 8, 1), device=device)
+        ], dim=-1)
+        noise3 = torch.cat([
+            torch.randn((bs, 8, 1), device=device),
+            torch.randn((bs, 8, 1), device=device) + 0.5
+        ], dim=-1)
+        noise4 = torch.cat([
+            torch.randn((bs, 8, 1), device=device),
+            torch.randn((bs, 8, 1), device=device) - 0.5
+        ], dim=-1)
+        stacked_gt_trajs = torch.stack([origin_noise, noise1, noise2, noise3, noise4], dim=1).to(device)
 
-        if self.HO_MODE == "acc":
-            img = norm_acc(stacked_gt_trajs)
-        elif self.HO_MODE == "vel":
-            img = norm_velo(stacked_gt_trajs)
 
+        # img = self.norm_odo(stacked_gt_trajs)
+        img = norm_traj(stacked_gt_trajs, type=self.config.traj_norm) 
         # noise = torch.randn(img.shape, device=device)
         # noisy_trajs = self.denorm_odo(img) 
         ego_fut_mode = img.shape[1]
-        velo_now_x = velo_ego[..., 0]
-        velo_now = torch.stack([velo_now_x, torch.zeros_like(velo_now_x)], dim=-1)
         for step_idx in denoise_steps:
             k = self.diffusion_scheduler.timesteps[:][step_idx]
-
             x_boxes = img
             if self.config.clamp:
                 x_boxes = torch.clamp(img, min=-1, max=1)
-                # x_boxes = torch.clamp(img, min=-3, max=3)
+            # noisy_traj_points = self.denorm_odo(x_boxes)
+            noisy_traj_points = denorm_traj(x_boxes, type=self.config.traj_norm)
 
-            if self.HO_MODE == "acc":
-                noisy_traj_points = denorm_acc(x_boxes)
-            elif self.HO_MODE == "vel":
-                noisy_traj_points = denorm_velo(x_boxes)
-
-            # 2. proj noisy_traj_points to the query
-            traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64)
-            traj_pos_embed = traj_pos_embed.flatten(-2)
-            traj_feature = self.plan_anchor_encoder(traj_pos_embed)
-            traj_feature = traj_feature.view(bs,ego_fut_mode,-1)
-
-            timesteps = k
-            if not torch.is_tensor(timesteps):
-                # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
-                timesteps = torch.tensor([timesteps], dtype=torch.long, device=img.device)
-            elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
-                timesteps = timesteps[None].to(img.device)
-            
-            # 3. embed the timesteps
-            timesteps = timesteps.expand(img.shape[0])
-            time_embed = self.time_mlp(timesteps)
-            time_embed = time_embed.view(bs,1,-1)
-
-            # 4. begin the stacked decoder
-            poses_reg_list = self.diff_decoder(traj_feature, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding,global_img)
-            ho_output = poses_reg_list[-1]
-            x_start = ho_output[...,:2]
-            if self.HO_MODE == "acc":
-                x_start = norm_acc(x_start)
-            elif self.HO_MODE == "vel":
-                x_start = norm_velo(x_start)
-            img = self.diffusion_scheduler.step(
-                model_output=x_start,
-                timestep=k,
-                sample=img
-            ).prev_sample
-
-        if self.HO_MODE == "acc":
-            pred_traj = high_order_to_trajectory(velocities = ho_output[...,:2], initial_position=None, initial_velocity=velo_now, dt=0.5, order=2) # torch.Size([64, 20, 8, 3])
-        elif self.HO_MODE == "vel":
-            pred_traj = high_order_to_trajectory(velocities = ho_output[...,:2], initial_position=None, initial_velocity=velo_now, dt=0.5, order=1) # torch.Size([64, 20, 8, 3])
-        # pred_traj[..., StateSE2Index.HEADING] = ho_output[..., StateSE2Index.HEADING]
-        pred_traj = torch.cat([pred_traj, ho_output[..., StateSE2Index.HEADING].unsqueeze(-1)], dim=-1)
-
-        return {"trajectory": pred_traj.squeeze(1), "pred_ho": pred_traj[..., :2].squeeze(1)}
-    
-    
-    def forward_test_trailing_mode(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding,global_img) -> Dict[str, torch.Tensor]:
-        bs = ego_query.shape[0]
-        device = ego_query.device
-        # n_trajs = self.n_trajs
-        # self.diffusion_scheduler.set_timesteps(1000, device)
-
-        self.diffusion_scheduler.set_timesteps(self.infer_step_num, device)
-        times = torch.linspace(-1, 1000-1, steps=self.infer_step_num + 1)
-        times = list(reversed(times.int().tolist()))
-        sample_timesteps = torch.tensor(times).to(device)
-
-        # 1. add noise to the plan anchor
-        stacked_gt_trajs = torch.randn((bs, 1, 8, 2)).to(device)
-        if self.zero_infer:
-            stacked_gt_trajs = torch.zeros((bs, 1, 8, 2)).to(device)
-        img = norm_traj(stacked_gt_trajs)
-        # noise = torch.randn(img.shape, device=device)
-        # noisy_trajs = self.denorm_odo(img) 
-        ego_fut_mode = img.shape[1]
-        for k in sample_timesteps[:]:
-            if k == -1 : continue
-            
-            x_boxes = img
-            if self.config.clamp:
-                x_boxes = torch.clamp(img, min=-1, max=1)
-            noisy_traj_points = denorm_traj(x_boxes)
 
             # 2. proj noisy_traj_points to the query
             traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64)
@@ -672,7 +574,64 @@ class TrajectoryHead(nn.Module):
             poses_reg_list = self.diff_decoder(traj_feature, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding,global_img)
             poses_reg = poses_reg_list[-1]
             x_start = poses_reg[...,:2]
-            x_start = norm_traj(x_start)
+            x_start = norm_traj(x_start, type=self.config.traj_norm)
+            img = self.diffusion_scheduler.step(
+                model_output=x_start,
+                timestep=k,
+                sample=img
+            ).prev_sample
+
+        return {"trajectory": poses_reg[:,0,:,:], "all_trajectory":poses_reg}
+    
+    
+    def forward_test_trailing_mode(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding,global_img) -> Dict[str, torch.Tensor]:
+        bs = ego_query.shape[0]
+        device = ego_query.device
+        # n_trajs = self.n_trajs
+        # self.diffusion_scheduler.set_timesteps(1000, device)
+
+        self.diffusion_scheduler.set_timesteps(self.infer_step_num, device)
+        times = torch.linspace(-1, 1000-1, steps=self.infer_step_num + 1)
+        times = list(reversed(times.int().tolist()))
+        sample_timesteps = torch.tensor(times).to(device)
+
+        # 1. add noise to the plan anchor
+        stacked_gt_trajs = torch.randn((bs, 1, 8, 2)).to(device)
+        if self.zero_infer:
+            stacked_gt_trajs = torch.zeros((bs, 1, 8, 2)).to(device)
+        img = self.norm_odo(stacked_gt_trajs)
+        # noise = torch.randn(img.shape, device=device)
+        # noisy_trajs = self.denorm_odo(img) 
+        ego_fut_mode = img.shape[1]
+        for k in sample_timesteps[:]:
+            if k == -1 : continue
+            
+            x_boxes = torch.clamp(img, min=-1, max=1)
+            noisy_traj_points = self.denorm_odo(x_boxes)
+
+            # 2. proj noisy_traj_points to the query
+            traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64)
+            traj_pos_embed = traj_pos_embed.flatten(-2)
+            traj_feature = self.plan_anchor_encoder(traj_pos_embed)
+            traj_feature = traj_feature.view(bs,ego_fut_mode,-1)
+
+            timesteps = k
+            if not torch.is_tensor(timesteps):
+                # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
+                timesteps = torch.tensor([timesteps], dtype=torch.long, device=img.device)
+            elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+                timesteps = timesteps[None].to(img.device)
+            
+            # 3. embed the timesteps
+            timesteps = timesteps.expand(img.shape[0])
+            time_embed = self.time_mlp(timesteps)
+            time_embed = time_embed.view(bs,1,-1)
+
+            # 4. begin the stacked decoder
+            poses_reg_list = self.diff_decoder(traj_feature, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding,global_img)
+            poses_reg = poses_reg_list[-1]
+            x_start = poses_reg[...,:2]
+            x_start = self.norm_odo(x_start)
             img = self.diffusion_scheduler.step(
                 model_output=x_start,
                 timestep=k,

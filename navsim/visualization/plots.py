@@ -6,8 +6,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 from navsim.agents.abstract_agent import AbstractAgent
-from navsim.common.dataclasses import Scene
-from navsim.visualization.config import BEV_PLOT_CONFIG, TRAJECTORY_CONFIG, CAMERAS_PLOT_CONFIG
+from navsim.common.dataclasses import Scene, Trajectory
+from navsim.visualization.config import BEV_PLOT_CONFIG, TRAJECTORY_CONFIG, CAMERAS_PLOT_CONFIG, MULTITRAJCONFIG
 from navsim.visualization.bev import add_configured_bev_on_ax, add_trajectory_to_bev_ax, add_trajectory_to_bev_ax_numpy
 from navsim.visualization.camera import add_annotations_to_camera_ax, add_lidar_to_camera_ax, add_camera_ax
 
@@ -90,6 +90,41 @@ def plot_bev_with_agent(scene: Scene, agent: AbstractAgent) -> Tuple[plt.Figure,
     configure_bev_ax(ax)
     configure_ax(ax)
 
+    return fig, ax
+
+
+def plot_bev_with_agent_multi_outputs(scene: Scene, agent: AbstractAgent) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Plots agent and human trajectory in birds-eye-view visualization
+    :param scene: navsim scene dataclass
+    :param agent: navsim agent
+    :return: figure and ax object of matplotlib
+    """
+
+    # human_trajectory = scene.get_future_trajectory()
+    agent_trajectory, agent_trajectory_list = agent.compute_trajectory(scene.get_agent_input())
+    agent_trajectory_list = agent_trajectory_list.squeeze(0)
+    num, _, __ = agent_trajectory_list.shape
+    new_list = []
+    for i in range(num):
+        new_list.append(agent_trajectory_list[i].numpy())
+
+    frame_idx = scene.scene_metadata.num_history_frames - 1
+    fig, ax = plt.subplots(1, 5, figsize=(25,5))
+    ax = ax.flatten()
+    for i in range(5):
+        add_configured_bev_on_ax(ax[i], scene.map_api, scene.frames[frame_idx])
+        add_trajectory_to_bev_ax(ax[i], Trajectory(new_list[i]), MULTITRAJCONFIG["TRAJ{}".format(i+1)])
+        configure_bev_ax(ax[i])
+        configure_ax(ax[i])
+        ax[i].legend(loc='best')    
+    # add_trajectory_to_bev_ax(ax, Trajectory(new_list[1]), MULTITRAJCONFIG["TRAJ2"])
+    # add_trajectory_to_bev_ax(ax, Trajectory(new_list[2]), MULTITRAJCONFIG["TRAJ3"])
+    # add_trajectory_to_bev_ax(ax, Trajectory(new_list[3]), MULTITRAJCONFIG["TRAJ4"])
+    # add_trajectory_to_bev_ax(ax, Trajectory(new_list[4]), MULTITRAJCONFIG["TRAJ5"])
+    # configure_bev_ax(ax)
+    # configure_ax(ax)
+    # ax.legend(loc='best')
     return fig, ax
 
 def plot_bev_with_pred_traj(scene: Scene, traj, traj2) -> Tuple[plt.Figure, plt.Axes]:

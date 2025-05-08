@@ -37,8 +37,9 @@ pip install -e . -i https://art-internal.hobot.cc/artifactory/api/pypi/pypi/simp
 
 # python navsim/planning/script/run_metric_caching.py train_test_split=navtest cache.cache_path=$NAVSIM_EXP_ROOT/metric_cache
 # agent_name=vanilla_diffusiondrive_agent
-agent_name=vddrive_ho
-
+# agent_name=vddrive_ho
+# agent_name=vddrive_ho
+agent_name=diffusiondrive_agent
 
 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         agent=$agent_name \
@@ -47,8 +48,14 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         split=trainval \
         cache_path=$NAVSIM_CACHE_PATH \
         use_cache_without_dataset=True  \
-        force_cache_computation=False \
-        "+agent.config.HO_MODE=vel"
+        force_cache_computation=False  
+        # "+agent.config.traj_norm=minmax"
+        # "+agent.config.clamp=False" 
+
+        # "dataloader.params.batch_size=128"
+        # "+agent.config.clamp=False" 
+        # "+agent.config.traj_norm=minmax" \
+        # "+agent.config.HO_MODE=vel"
         # debug=True
 
 ckpt_path=$(find $NAVSIM_EXP_ROOT/ -type f -name '*.ckpt')
@@ -61,7 +68,17 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
         worker=ray_distributed \
         "agent.checkpoint_path=$escaped_path"\
         metric_cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/metric_cache/" \
-        experiment_name=${agent_name}_eval_step2
+        experiment_name=${agent_name}
+
+
+# python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+#         train_test_split=navtest \
+#         agent=$agent_name \
+#         worker=ray_distributed \
+#         "agent.checkpoint_path=$escaped_path"\
+#         metric_cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/metric_cache/" \
+#         "+agent.config.infer_step_num=20" 
+#         experiment_name=${agent_name}_eval_step20
 
 # rm $NAVSIM_DEVKIT_ROOT/navsim/agents/$agent_name/transfuser_config.py
 
@@ -76,4 +93,4 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
 #         experiment_name=${agent_name}_eval_step2
 
 
-# aidi-inf-cli job submit -f EDA.yaml -t ~/temp_dir
+# aidi-inf-cli job submit -f diffusiondrive.yaml -t ~/temp_dir 

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Tuple, List
+from typing import Tuple, List, Literal
 
 import numpy as np
 from nuplan.common.maps.abstract_map import SemanticMapLayer
@@ -16,7 +16,6 @@ class TransfuserConfig:
     image_architecture: str = "resnet34"
     lidar_architecture: str = "resnet34"
     bkb_path: str = "/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/diffusiondrive/pytorch_model.bin"
-    # plan_anchor_path: str = "/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/diffusiondrive/kmeans_navsim_traj_20.npy"
 
     latent: bool = False
     latent_rad_thresh: float = 4 * np.pi / 9
@@ -84,9 +83,12 @@ class TransfuserConfig:
     trajectory_reg_weight: float = 8.0
     diff_loss_weight: float = 20.0
     
+    # vddrive
     infer_step_num: int = 2
     trailing_mode: bool = False
     zero_infer: bool = False
+    traj_norm: Literal["znorm", "minmax"] = "znorm"
+    clamp: bool = True
 
     agent_class_weight: float = 10.0
     agent_box_weight: float = 1.0

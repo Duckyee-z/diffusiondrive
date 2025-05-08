@@ -8,21 +8,19 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from navsim.agents.abstract_agent import AbstractAgent
-from navsim.agents.vddrive_ho.transfuser_config import TransfuserConfig
+from navsim.agents.vdiffusiondrivev3.transfuser_config import TransfuserConfig
 
-from navsim.agents.vddrive_ho.transfuser_model_v2 import V2TransfuserModel as TransfuserModel
+from navsim.agents.vdiffusiondrivev3.transfuser_model_v2 import V2TransfuserModel as TransfuserModel
 
-from navsim.agents.vddrive_ho.transfuser_callback import TransfuserCallback 
-from navsim.agents.vddrive_ho.transfuser_loss import transfuser_loss
-from navsim.agents.vddrive_ho.transfuser_features import TransfuserFeatureBuilder, TransfuserTargetBuilder
+from navsim.agents.vdiffusiondrivev3.transfuser_callback import TransfuserCallback 
+from navsim.agents.vdiffusiondrivev3.transfuser_loss import transfuser_loss
+from navsim.agents.vdiffusiondrivev3.transfuser_features import TransfuserFeatureBuilder, TransfuserTargetBuilder
 from navsim.common.dataclasses import SensorConfig
 from navsim.planning.training.abstract_feature_target_builder import AbstractFeatureBuilder, AbstractTargetBuilder
-from navsim.agents.vddrive_ho.modules.scheduler import WarmupCosLR
+from navsim.agents.vdiffusiondrivev3.modules.scheduler import WarmupCosLR
 from omegaconf import DictConfig, OmegaConf, open_dict
 import torch.optim as optim
 from navsim.common.dataclasses import AgentInput, Trajectory, SensorConfig
-
-
 def build_from_configs(obj, cfg: DictConfig, **kwargs):
     if cfg is None:
         return None
@@ -185,10 +183,27 @@ class TransfuserAgent(AbstractAgent):
 
     def get_training_callbacks(self) -> List[pl.Callback]:
         """Inherited, see superclass."""
-        # return [TransfuserCallback(self._config)]
-        return [TransfuserCallback(self._config), 
-                ModelCheckpoint(every_n_epochs=2, # 每2个epoch保存一次
-                                save_top_k=3,     # 最多保留3个检查点
-                                monitor='epoch',  # 监控的指标为epoch数
-                                mode='max')
-                ]
+        return [TransfuserCallback(self._config)]
+    
+    def compute_trajectory(self, agent_input: AgentInput) -> Trajectory:
+        """
+        Computes the ego vehicle trajectory.
+        :param current_input: Dataclass with agent inputs.
+        :return: Trajectory representing the predicted ego's position in future
+        """
+        self.eval()
+        features: Dict[str, torch.Tensor] = {}
+        # build features
+        for builder in self.get_feature_builders():
+            features.update(builder.compute_features(agent_input))
+
+        # add batch dimension
+        features = {k: v.unsqueeze(0) for k, v in features.items()}
+
+        # forward pass
+        with torch.no_grad():
+            predictions = self.forward(features)
+            poses = predictions["trajectory"].squeeze(0).numpy()
+
+        # extract trajectory
+        return Trajectory(poses), predictions["all_trajectory"]

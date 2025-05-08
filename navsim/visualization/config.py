@@ -45,7 +45,7 @@ ELLIS_5: Dict[int, str] = {
 
 BEV_PLOT_CONFIG: Dict[str, Any] = {
     "figure_size": (5, 5),
-    "figure_margin": (64, 64),
+    "figure_margin": (32, 32),
     "background_color": "white",
     "layers": ["map", "annotations"],  # "map", "annotations", "lidar"
 }
@@ -294,5 +294,75 @@ TRAJECTORY_CONFIG: Dict[str, Any] = {
         "marker_size": 5,
         "marker_edge_color": "black",
         "zorder": 3,
+    },
+}
+
+
+
+MULTITRAJCONFIG: Dict[str, Any] = {
+    "TRAJ1": {
+        "fill_color": ELLIS_5[0],
+        "fill_color_alpha": 1.0,
+        "line_color": ELLIS_5[0],
+        "line_color_alpha": 1.0,
+        "line_width": 2.0,
+        "line_style": "-",
+        "marker": "o",
+        "marker_size": 5,
+        "marker_edge_color": "black",
+        "zorder": 3,
+        "legend_label": "Traj1 bias=0",
+    },
+    "TRAJ2": {
+        "fill_color": ELLIS_5[1],
+        "fill_color_alpha": 1.0,
+        "line_color": ELLIS_5[1],
+        "line_color_alpha": 1.0,
+        "line_width": 2.0,
+        "line_style": "-",
+        "marker": "o",
+        "marker_size": 5,
+        "marker_edge_color": "black",
+        "zorder": 3,
+        "legend_label": "Traj2 xbias=2",
+    },
+    "TRAJ3": {
+        "fill_color": ELLIS_5[2],
+        "fill_color_alpha": 1.0,
+        "line_color": ELLIS_5[2],
+        "line_color_alpha": 1.0,
+        "line_width": 2.0,
+        "line_style": "-",
+        "marker": "o",
+        "marker_size": 5,
+        "marker_edge_color": "black",
+        "zorder": 3,
+        "legend_label": "Traj3 xbias=-2",
+    },
+    "TRAJ4": {
+        "fill_color": ELLIS_5[3],
+        "fill_color_alpha": 1.0,
+        "line_color": ELLIS_5[3],
+        "line_color_alpha": 1.0,
+        "line_width": 2.0,
+        "line_style": "-",
+        "marker": "o",
+        "marker_size": 5,
+        "marker_edge_color": "black",
+        "zorder": 3,
+        "legend_label": "Traj4 ybias=0.2",
+    },
+    "TRAJ5": {
+        "fill_color": ELLIS_5[4],
+        "fill_color_alpha": 1.0,
+        "line_color": ELLIS_5[4],
+        "line_color_alpha": 1.0,
+        "line_width": 2.0,
+        "line_style": "-",
+        "marker": "o",
+        "marker_size": 5,
+        "marker_edge_color": "black",
+        "zorder": 3,
+        "legend_label": "Traj5 ybias=-0.2",
     },
 }

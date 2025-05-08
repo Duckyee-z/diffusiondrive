@@ -4,8 +4,8 @@ from scipy.optimize import linear_sum_assignment
 import torch
 import torch.nn.functional as F
 
-from navsim.agents.vddrive_ho.transfuser_config import TransfuserConfig
-from navsim.agents.vddrive_ho.transfuser_features import BoundingBox2DIndex
+from navsim.agents.vdiffusiondrivev3.transfuser_config import TransfuserConfig
+from navsim.agents.vdiffusiondrivev3.transfuser_features import BoundingBox2DIndex
 
 
 def transfuser_loss(
@@ -27,19 +27,13 @@ def transfuser_loss(
     bev_semantic_loss = F.cross_entropy(
         predictions["bev_semantic_map"], targets["bev_semantic_map"].long()
     )
-    # if 'diffusion_loss' in predictions:
-    #     diffusion_loss = predictions['diffusion_loss']
-    # else:
-    #     diffusion_loss = 0
-    if 'ho_loss' in predictions:
-        ho_loss = predictions['ho_loss']
+    if 'diffusion_loss' in predictions:
+        diffusion_loss = predictions['diffusion_loss']
     else:
-        gt_ho = targets.get("acceleration") if config.HO_MODE == "acc" else targets.get("velocity")
-        ho_loss = F.mse_loss(predictions['pred_ho'], gt_ho)
-
+        diffusion_loss = 0
     loss = (
         config.trajectory_weight * trajectory_loss
-        + config.diff_loss_weight * ho_loss
+        + config.diff_loss_weight * diffusion_loss
         + config.agent_class_weight * agent_class_loss
         + config.agent_box_weight * agent_box_loss
         + config.bev_semantic_weight * bev_semantic_loss
@@ -47,18 +41,14 @@ def transfuser_loss(
     loss_dict = {
         'loss': loss,
         'trajectory_loss': config.trajectory_weight*trajectory_loss,
-        'HO_loss': config.diff_loss_weight*ho_loss,
+        'diffusion_loss': config.diff_loss_weight*diffusion_loss,
         'agent_class_loss': config.agent_class_weight*agent_class_loss,
         'agent_box_loss': config.agent_box_weight*agent_box_loss,
         'bev_semantic_loss': config.bev_semantic_weight*bev_semantic_loss
     }
-    if "ho_loss_dict" in predictions:
-        ho_loss_dict = predictions["ho_loss_dict"]
-        loss_dict.update(ho_loss_dict)
     if "trajectory_loss_dict" in predictions:
         trajectory_loss_dict = predictions["trajectory_loss_dict"]
         loss_dict.update(trajectory_loss_dict)
-
     # import ipdb; ipdb.set_trace()
     return loss_dict
 

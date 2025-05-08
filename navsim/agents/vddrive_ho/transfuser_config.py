@@ -78,7 +78,7 @@ class TransfuserConfig:
     num_bounding_boxes: int = 30
 
     # loss weights
-    trajectory_weight: float = 12.0
+    trajectory_weight: float = 6.0
     trajectory_cls_weight: float = 10.0
     trajectory_reg_weight: float = 8.0
     diff_loss_weight: float = 20.0
@@ -91,6 +91,7 @@ class TransfuserConfig:
     HO_vel_norm: Literal["znorm", "minmax"] = "znorm"
     HO_acc_norm: Literal["znorm", "minmax"] = "znorm"
     HO_MODE: Literal["acc", "vel"] = "acc"
+    clamp: bool = True
 
     agent_class_weight: float = 10.0
     agent_box_weight: float = 1.0

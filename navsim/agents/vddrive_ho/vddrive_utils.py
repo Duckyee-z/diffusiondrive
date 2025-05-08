@@ -46,6 +46,20 @@ velo_point_stats = torch.tensor([
 ], dtype=torch.float32)
 
 
+acc_point_minmax_stats = torch.tensor([
+    # 第1个样本
+    [[-2.47, 2.39], [-1.79, 2.05]], 
+    # 第2个样本
+    [[-2.57, 2.52], [-1.77, 2.04]], 
+    [[-2.62, 2.6], [-1.76, 2.02]], 
+    [[-2.62, 2.6], [-1.75, 2.0]], 
+    [[-2.57, 2.54], [-1.74, 1.96]], 
+    [[-2.48, 2.43], [-1.72, 1.91]], 
+    [[-2.37, 2.31], [-1.67, 1.85]], 
+    [[-2.24, 2.17], [-1.63, 1.79]]
+
+], dtype=torch.float32)
+
 
 
 
@@ -69,14 +83,14 @@ def norm_acc(acc, type='znorm'): # traj_info_fut ([64, 20, 8, 2])
     if type == 'znorm':
         return norm_traj_znorm(acc, stats=acc_point_stats)
     elif type == 'minmax':
-        raise NotImplementedError("minmax normalization is not implemented")
+        return norm_traj_minmax(acc, vec=acc_point_minmax_stats)
     else :
         raise ValueError("Unknown normalization type: {}".format(type))
 def denorm_acc(acc, type='znorm'):
     if type == 'znorm':
         return denorm_traj_znorm(acc, stats=acc_point_stats)
     elif type == 'minmax':
-        raise NotImplementedError("minmax denormalization is not implemented")
+        return denorm_traj_minmax(acc, vec=acc_point_minmax_stats)
     else :
         raise ValueError("Unknown denormalization type: {}".format(type))
 def norm_velo(velo, type='znorm'): # traj_info_fut ([64, 20, 8, 2])
@@ -130,6 +144,57 @@ def denorm_traj_znorm( odo_info_fut, stats=traj_point_stats):
     denormed_odo_info_fut = odo_info_fut * std + mean
 
     return denormed_odo_info_fut
+
+def norm_traj_minmax(odo_info_fut, vec=acc_point_minmax_stats): # odo_info_fut ([64, 20, 8, 2])
+        """
+        对输入张量的每个点的x和y坐标进行Min-Max归一化。
+        args:
+            tensor (torch.Tensor): 形状为(B, L, 8, 2)的输入张量。
+            vec (torch.Tensor): 形状为(8, 2, 2)的极值张量, 其中vec[i, j, 0]为最小值, vec[i, j, 1]为最大值。
+        
+        return:
+            torch.Tensor: 归一化后的张量，形状与输入相同。
+        """
+        # 提取每个点的x和y的min、max
+        x_mins = vec[:, 0, 0].to(odo_info_fut.device)  # 形状 (8,)
+        x_maxs = vec[:, 0, 1].to(odo_info_fut.device)
+        y_mins = vec[:, 1, 0].to(odo_info_fut.device)
+        y_maxs = vec[:, 1, 1].to(odo_info_fut.device)
+        
+        # 分离x和y坐标
+        x_coords = odo_info_fut[..., 0]  # 形状 (B, L, 8)
+        y_coords = odo_info_fut[..., 1]
+        
+        # 计算归一化后的坐标，利用广播机制
+        x_range = x_maxs - x_mins
+        normalized_x = 2* (x_coords - x_mins[None, None, :]) / x_range[None, None, :] - 1
+        
+        y_range = y_maxs - y_mins
+        normalized_y = 2* (y_coords - y_mins[None, None, :]) / y_range[None, None, :] - 1 
+        
+        # 合并结果并保持原有维度
+
+        return torch.stack([normalized_x, normalized_y], dim=-1)
+    
+def denorm_traj_minmax(odo_info_fut, vec=acc_point_minmax_stats):
+        # 提取每个点的x和y的min、max
+        x_mins = vec[:, 0, 0].to(odo_info_fut.device)  # 形状 (8,)
+        x_maxs = vec[:, 0, 1].to(odo_info_fut.device)
+        y_mins = vec[:, 1, 0].to(odo_info_fut.device)
+        y_maxs = vec[:, 1, 1].to(odo_info_fut.device)
+
+        # 分离x和y坐标
+        x_norm = odo_info_fut[..., 0]  # 形状 (B, L, 8)
+        y_norm = odo_info_fut[..., 1]
+
+        # 计算归一化后的坐标，利用广播机制
+        x_range = x_maxs - x_mins
+        denormalized_x = ((x_norm + 1) / 2) * x_range[None, None, :] + x_mins[None, None, :]
+        
+        y_range = y_maxs - y_mins
+        denormalized_y = ((y_norm + 1) / 2) * y_range[None, None, :] + y_mins[None, None, :]
+        
+        return torch.stack([denormalized_x, denormalized_y], dim=-1)
 
 
 def high_order_integration(accelerations, initial_velocity=None, dt=0.5):

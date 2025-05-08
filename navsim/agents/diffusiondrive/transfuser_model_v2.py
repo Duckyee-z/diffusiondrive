@@ -14,6 +14,7 @@ from navsim.agents.diffusiondrive.modules.blocks import linear_relu_ln,bias_init
 from navsim.agents.diffusiondrive.modules.multimodal_loss import LossComputer
 from torch.nn import TransformerDecoder,TransformerDecoderLayer
 from typing import Any, List, Dict, Optional, Union
+from navsim.agents.diffusiondrive.vddrive_utils import norm_traj, denorm_traj
 class V2TransfuserModel(nn.Module):
     """Torch module for Transfuser."""
 
@@ -339,7 +340,7 @@ class CustomTransformerDecoderLayer(nn.Module):
         # 4.8 modulate with time steps
         traj_feature = self.time_modulation(traj_feature, time_embed,global_cond=None,global_img=global_img)
         
-        # 4.9 predict the offset & heading
+        # 4.9 predict the offset & heading # bs,20,8,2
         poses_reg, poses_cls = self.task_decoder(traj_feature) #bs,20,8,3; bs,20
         poses_reg[...,:2] = poses_reg[...,:2] + noisy_traj_points
         poses_reg[..., StateSE2Index.HEADING] = poses_reg[..., StateSE2Index.HEADING].tanh() * np.pi
@@ -433,24 +434,24 @@ class TrajectoryHead(nn.Module):
         self.diff_decoder = CustomTransformerDecoder(diff_decoder_layer, 2)
 
         self.loss_computer = LossComputer(config)
-    def norm_odo(self, odo_info_fut): # odo_info_fut ([64, 20, 8, 2])
-        odo_info_fut_x = odo_info_fut[..., 0:1] # ([64, 20, 8, 1])
-        odo_info_fut_y = odo_info_fut[..., 1:2] # ([64, 20, 8, 1]) 
-        odo_info_fut_head = odo_info_fut[..., 2:3] # ([64, 20, 8, 0])
+    # def norm_odo(self, odo_info_fut): # odo_info_fut ([64, 20, 8, 2])
+    #     odo_info_fut_x = odo_info_fut[..., 0:1] # ([64, 20, 8, 1])
+    #     odo_info_fut_y = odo_info_fut[..., 1:2] # ([64, 20, 8, 1]) 
+    #     odo_info_fut_head = odo_info_fut[..., 2:3] # ([64, 20, 8, 0])
 
-        odo_info_fut_x = 2*(odo_info_fut_x + 1.2)/56.9 -1
-        odo_info_fut_y = 2*(odo_info_fut_y + 20)/46 -1
-        odo_info_fut_head = 2*(odo_info_fut_head + 2)/3.9 -1
-        return torch.cat([odo_info_fut_x, odo_info_fut_y, odo_info_fut_head], dim=-1)
-    def denorm_odo(self, odo_info_fut):
-        odo_info_fut_x = odo_info_fut[..., 0:1]
-        odo_info_fut_y = odo_info_fut[..., 1:2]
-        odo_info_fut_head = odo_info_fut[..., 2:3]
+    #     odo_info_fut_x = 2*(odo_info_fut_x + 1.2)/56.9 -1
+    #     odo_info_fut_y = 2*(odo_info_fut_y + 20)/46 -1
+    #     odo_info_fut_head = 2*(odo_info_fut_head + 2)/3.9 -1
+    #     return torch.cat([odo_info_fut_x, odo_info_fut_y, odo_info_fut_head], dim=-1)
+    # def denorm_odo(self, odo_info_fut):
+    #     odo_info_fut_x = odo_info_fut[..., 0:1]
+    #     odo_info_fut_y = odo_info_fut[..., 1:2]
+    #     odo_info_fut_head = odo_info_fut[..., 2:3]
 
-        odo_info_fut_x = (odo_info_fut_x + 1)/2 * 56.9 - 1.2
-        odo_info_fut_y = (odo_info_fut_y + 1)/2 * 46 - 20
-        odo_info_fut_head = (odo_info_fut_head + 1)/2 * 3.9 - 2
-        return torch.cat([odo_info_fut_x, odo_info_fut_y, odo_info_fut_head], dim=-1)
+    #     odo_info_fut_x = (odo_info_fut_x + 1)/2 * 56.9 - 1.2
+    #     odo_info_fut_y = (odo_info_fut_y + 1)/2 * 46 - 20
+    #     odo_info_fut_head = (odo_info_fut_head + 1)/2 * 3.9 - 2
+        # return torch.cat([odo_info_fut_x, odo_info_fut_y, odo_info_fut_head], dim=-1)
     def forward(self, ego_query, agents_query, bev_feature,bev_spatial_shape,status_encoding, targets=None,global_img=None) -> Dict[str, torch.Tensor]:
         """Torch module forward pass."""
         if self.training:
@@ -464,7 +465,9 @@ class TrajectoryHead(nn.Module):
         device = ego_query.device
         # 1. add truncated noise to the plan anchor
         plan_anchor = self.plan_anchor.unsqueeze(0).repeat(bs,1,1,1) # torch.Size([64, 20, 8, 2])
-        odo_info_fut = self.norm_odo(plan_anchor) # torch.Size([64, 20, 8, 2])
+        # odo_info_fut = self.norm_odo(plan_anchor) # torch.Size([64, 20, 8, 2])
+        odo_info_fut = norm_traj(plan_anchor, type='minmax') # torch.Size([64, 20, 8, 2])
+
         timesteps = torch.randint(
             0, 50,
             (bs,), device=device
@@ -476,7 +479,9 @@ class TrajectoryHead(nn.Module):
             timesteps=timesteps,
         ).float()
         noisy_traj_points = torch.clamp(noisy_traj_points, min=-1, max=1)
-        noisy_traj_points = self.denorm_odo(noisy_traj_points)
+        # noisy_traj_points = self.denorm_odo(noisy_traj_points)
+        noisy_traj_points = denorm_traj(noisy_traj_points,type='minmax')
+
 
         ego_fut_mode = noisy_traj_points.shape[1] # torch.Size([64, 20, 8, 2])
         # 2. proj noisy_traj_points to the query
@@ -516,15 +521,20 @@ class TrajectoryHead(nn.Module):
 
         # 1. add truncated noise to the plan anchor
         plan_anchor = self.plan_anchor.unsqueeze(0).repeat(bs,1,1,1)
-        img = self.norm_odo(plan_anchor)
+        img = norm_traj(plan_anchor,type='minmax')
+        # img = self.norm_odo(plan_anchor)
+
         noise = torch.randn(img.shape, device=device)
         trunc_timesteps = torch.ones((bs,), device=device, dtype=torch.long) * 8
         img = self.diffusion_scheduler.add_noise(original_samples=img, noise=noise, timesteps=trunc_timesteps)
-        noisy_trajs = self.denorm_odo(img)
+        # noisy_trajs = self.denorm_odo(img)
+        noisy_trajs = denorm_traj(img,type='minmax')
         ego_fut_mode = img.shape[1]
         for k in roll_timesteps[:]:
             x_boxes = torch.clamp(img, min=-1, max=1)
-            noisy_traj_points = self.denorm_odo(x_boxes)
+            # noisy_traj_points = self.denorm_odo(x_boxes)
+            noisy_traj_points = denorm_traj(x_boxes, type='minmax')
+
 
             # 2. proj noisy_traj_points to the query
             traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64)
@@ -549,7 +559,8 @@ class TrajectoryHead(nn.Module):
             poses_reg = poses_reg_list[-1]
             poses_cls = poses_cls_list[-1]
             x_start = poses_reg[...,:2]
-            x_start = self.norm_odo(x_start)
+            # x_start = self.norm_odo(x_start)
+            x_start = norm_traj(x_start, type='minmax')
             img = self.diffusion_scheduler.step(
                 model_output=x_start,
                 timestep=k,
