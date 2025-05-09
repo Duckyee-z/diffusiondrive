@@ -8,16 +8,16 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from navsim.agents.abstract_agent import AbstractAgent
-from navsim.agents.vdiffusiondrivev2.transfuser_config import TransfuserConfig
+from navsim.agents.vddrivev2.transfuser_config import TransfuserConfig
 
-from navsim.agents.vdiffusiondrivev2.transfuser_model_v2 import V2TransfuserModel as TransfuserModel
+from navsim.agents.vddrivev2.transfuser_model_v2 import V2TransfuserModel as TransfuserModel
 
-from navsim.agents.vdiffusiondrivev2.transfuser_callback import TransfuserCallback 
-from navsim.agents.vdiffusiondrivev2.transfuser_loss import transfuser_loss
-from navsim.agents.vdiffusiondrivev2.transfuser_features import TransfuserFeatureBuilder, TransfuserTargetBuilder
+from navsim.agents.vddrivev2.transfuser_callback import TransfuserCallback 
+from navsim.agents.vddrivev2.transfuser_loss import transfuser_loss
+from navsim.agents.vddrivev2.transfuser_features import TransfuserFeatureBuilder, TransfuserTargetBuilder
 from navsim.common.dataclasses import SensorConfig
 from navsim.planning.training.abstract_feature_target_builder import AbstractFeatureBuilder, AbstractTargetBuilder
-from navsim.agents.vdiffusiondrivev2.modules.scheduler import WarmupCosLR
+from navsim.agents.vddrivev2.modules.scheduler import WarmupCosLR
 from omegaconf import DictConfig, OmegaConf, open_dict
 import torch.optim as optim
 from navsim.common.dataclasses import AgentInput, Trajectory, SensorConfig

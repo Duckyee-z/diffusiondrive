@@ -15,7 +15,7 @@ from nuplan.common.actor_state.oriented_box import OrientedBox
 from nuplan.common.actor_state.state_representation import StateSE2
 from nuplan.common.actor_state.tracked_objects_types import TrackedObjectType
 
-from navsim.agents.vdiffusiondrive.transfuser_config import TransfuserConfig
+from navsim.agents.vddrivev2.transfuser_config import TransfuserConfig
 from navsim.common.dataclasses import AgentInput, Scene, Annotations
 from navsim.common.enums import BoundingBoxIndex, LidarIndex
 from navsim.planning.scenario_builder.navsim_scenario_utils import tracked_object_types

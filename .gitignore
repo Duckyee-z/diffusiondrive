@@ -6,4 +6,6 @@ tb_logs/
 *.pkl
 *.png
 diffusiondrive.yaml
-train_swarm.sh
+*.ipynb
+navsim.egg-info
+build/

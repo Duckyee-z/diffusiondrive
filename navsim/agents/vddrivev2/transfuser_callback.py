@@ -9,12 +9,13 @@ import torch
 import torchvision.utils as vutils
 import pytorch_lightning as pl
 
+
 from nuplan.common.actor_state.oriented_box import OrientedBox
 from nuplan.common.actor_state.state_representation import StateSE2
 from nuplan.common.maps.abstract_map import SemanticMapLayer
 
-from navsim.agents.vdiffusiondrive.transfuser_features import BoundingBox2DIndex
-from navsim.agents.vdiffusiondrive.transfuser_config import TransfuserConfig
+from navsim.agents.vddrivev2.transfuser_features import BoundingBox2DIndex
+from navsim.agents.vddrivev2.transfuser_config import TransfuserConfig
 from navsim.visualization.config import MAP_LAYER_CONFIG, AGENT_CONFIG
 
 

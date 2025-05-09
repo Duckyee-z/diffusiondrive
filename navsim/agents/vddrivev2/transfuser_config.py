@@ -16,7 +16,6 @@ class TransfuserConfig:
     image_architecture: str = "resnet34"
     lidar_architecture: str = "resnet34"
     bkb_path: str = "/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/diffusiondrive/pytorch_model.bin"
-    plan_anchor_path: str = "/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/diffusiondrive/kmeans_navsim_traj_20.npy"
 
     latent: bool = False
     latent_rad_thresh: float = 4 * np.pi / 9
@@ -60,9 +59,6 @@ class TransfuserConfig:
     # Initial weight of the layer norms in the gpt.
     gpt_layer_norm_init_weight = 1.0
 
-    # diffusion
-    sampling_timesteps = 20
-
     perspective_downsample_factor = 1
     transformer_decoder_join = True
     detect_boxes = True
@@ -87,6 +83,8 @@ class TransfuserConfig:
     trajectory_reg_weight: float = 8.0
     diff_loss_weight: float = 20.0
     
+    infer_step_num: int = 20
+
     agent_class_weight: float = 10.0
     agent_box_weight: float = 1.0
     bev_semantic_weight: float = 14.0

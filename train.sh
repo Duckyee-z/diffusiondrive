@@ -1,7 +1,7 @@
 
-agent_name=diffusiondrive_agent
+agent_name=vddrivev2
 
-CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_data_analyse.py \
+CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         agent=$agent_name \
         experiment_name=$agent_name\
         train_test_split=navtrain  \
