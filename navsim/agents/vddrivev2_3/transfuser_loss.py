@@ -4,8 +4,8 @@ from scipy.optimize import linear_sum_assignment
 import torch
 import torch.nn.functional as F
 
-from navsim.agents.vddrivev2.transfuser_config import TransfuserConfig
-from navsim.agents.vddrivev2.transfuser_features import BoundingBox2DIndex
+from navsim.agents.vddrivev2_3.transfuser_config import TransfuserConfig
+from navsim.agents.vddrivev2_3.transfuser_features import BoundingBox2DIndex
 
 
 def transfuser_loss(
@@ -49,9 +49,6 @@ def transfuser_loss(
     if "trajectory_loss_dict" in predictions:
         trajectory_loss_dict = predictions["trajectory_loss_dict"]
         loss_dict.update(trajectory_loss_dict)
-    if "diffusion_loss_dict" in predictions:
-        diffusion_loss_dict = predictions["diffusion_loss_dict"]
-        loss_dict.update(diffusion_loss_dict)
     # import ipdb; ipdb.set_trace()
     return loss_dict
 

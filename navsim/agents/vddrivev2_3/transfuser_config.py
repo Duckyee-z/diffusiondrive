@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Tuple, List
+from typing import Tuple, List, Literal
 
 import numpy as np
 from nuplan.common.maps.abstract_map import SemanticMapLayer
@@ -82,14 +82,12 @@ class TransfuserConfig:
     trajectory_cls_weight: float = 10.0
     trajectory_reg_weight: float = 8.0
     diff_loss_weight: float = 20.0
-    # vdd
+    
+    # vddrive
     infer_step_num: int = 2
     random_init: bool = True
     speed_anchor: bool = True
     use_diffusion_loss: bool = True
-
-    if not use_diffusion_loss:
-        diff_loss_weight = 0.0
 
     agent_class_weight: float = 10.0
     agent_box_weight: float = 1.0
