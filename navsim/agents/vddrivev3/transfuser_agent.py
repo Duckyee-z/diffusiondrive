@@ -8,16 +8,16 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from navsim.agents.abstract_agent import AbstractAgent
-from navsim.agents.vddrivev2_3.transfuser_config import TransfuserConfig
+from navsim.agents.vddrivev3.transfuser_config import TransfuserConfig
 
-from navsim.agents.vddrivev2_3.transfuser_model_v2 import V2TransfuserModel as TransfuserModel
+from navsim.agents.vddrivev3.transfuser_model_v2 import V2TransfuserModel as TransfuserModel
 
-from navsim.agents.vddrivev2_3.transfuser_callback import TransfuserCallback 
-from navsim.agents.vddrivev2_3.transfuser_loss import transfuser_loss
-from navsim.agents.vddrivev2_3.transfuser_features import TransfuserFeatureBuilder, TransfuserTargetBuilder
+from navsim.agents.vddrivev3.transfuser_callback import TransfuserCallback 
+from navsim.agents.vddrivev3.transfuser_loss import transfuser_loss
+from navsim.agents.vddrivev3.transfuser_features import TransfuserFeatureBuilder, TransfuserTargetBuilder
 from navsim.common.dataclasses import SensorConfig
 from navsim.planning.training.abstract_feature_target_builder import AbstractFeatureBuilder, AbstractTargetBuilder
-from navsim.agents.vddrivev2_3.modules.scheduler import WarmupCosLR
+from navsim.agents.vddrivev3.modules.scheduler import WarmupCosLR
 from omegaconf import DictConfig, OmegaConf, open_dict
 import torch.optim as optim
 from navsim.common.dataclasses import AgentInput, Trajectory, SensorConfig
@@ -183,8 +183,4 @@ class TransfuserAgent(AbstractAgent):
 
     def get_training_callbacks(self) -> List[pl.Callback]:
         """Inherited, see superclass."""
-        return [TransfuserCallback(self._config),
-                ModelCheckpoint(every_n_epochs=2, # 每2个epoch保存一次
-                                save_top_k=5,     # 最多保留3个检查点
-                                monitor='epoch',  # 监控的指标为epoch数
-                                mode='max')]
+        return [TransfuserCallback(self._config)]

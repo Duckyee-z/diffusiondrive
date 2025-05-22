@@ -1,5 +1,28 @@
 
-agent_name=vddrivev2
+# agent_name=vddrivev2
+# agent_name=vdiffusiondrivev2_minmaxnorm
+agent_name=vddrivev2.3
+
+CUDA_VISIBLE_DEVICES=5 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
+        agent=$agent_name \
+        experiment_name=test_exp \
+        train_test_split=navtrain  \
+        split=trainval   \
+        cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/training_cache/" \
+        use_cache_without_dataset=True  \
+        force_cache_computation=False \
+        debug=True \
+        +agent.config.anchor_embed=True \
+        'trainer.params.max_epochs=15' \
+        +agent.config.use_mse_loss=True 
+        # +agent.config.with_query_as_embedding=True \
+        # 'trainer.params.max_epochs=15' \
+        # +agent.config.use_mse_loss=True 
+        # +agent.config.anchor_embed=True \
+        # +agent.config.anchor_embed_interact=True
+
+        # +agent.config.with_query_as_embedding=True
+        # +agent.config.anchor_embed_interact=True
 
 # CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
 #         agent=$agent_name \
@@ -24,13 +47,13 @@ agent_name=vddrivev2
 #         experiment_name=${agent_name}_eval
 
 
-python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_data_analyse_ho.py \
-        agent=$agent_name \
-        experiment_name=$agent_name\
-        train_test_split=navtrain  \
-        split=trainval   \
-        trainer.params.max_epochs=2 \
-        cache_path=/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/training_cache_HO/ \
-        use_cache_without_dataset=True \
-        force_cache_computation=False 
+# python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_data_analyse_ho.py \
+#         agent=$agent_name \
+#         experiment_name=$agent_name\
+#         train_test_split=navtrain  \
+#         split=trainval   \
+#         trainer.params.max_epochs=2 \
+#         cache_path=/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/training_cache_HO/ \
+#         use_cache_without_dataset=True \
+#         force_cache_computation=False 
         # debug=true

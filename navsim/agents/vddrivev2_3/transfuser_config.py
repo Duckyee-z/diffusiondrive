@@ -85,9 +85,15 @@ class TransfuserConfig:
     
     # vddrive
     infer_step_num: int = 2
-    random_init: bool = True
     speed_anchor: bool = True
-    use_diffusion_loss: bool = True
+    use_diffusion_loss: bool = False
+    random_scale: float = 1.0
+    infer_minus_anchor: bool = False # use
+    anchor_embed: bool = False
+    with_query_as_embedding: bool = False
+    anchor_embed_interact: bool = False
+    infer_timestep_spacing: Literal["trailing", "leading"] = "leading"
+    use_mse_loss: bool = False
 
     agent_class_weight: float = 10.0
     agent_box_weight: float = 1.0

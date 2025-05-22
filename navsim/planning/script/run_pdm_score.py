@@ -128,6 +128,7 @@ def main(cfg: DictConfig) -> None:
     if num_unused_metric_cache_tokens > 0:
         logger.warning(f"Unused metric cache for {num_unused_metric_cache_tokens} tokens. Skipping these tokens.")
     logger.info("Starting pdm scoring of %s scenarios...", str(len(tokens_to_evaluate)))
+
     data_points = [
         {
             "cfg": cfg,
