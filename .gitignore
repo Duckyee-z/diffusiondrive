@@ -9,3 +9,4 @@ diffusiondrive.yaml
 *.ipynb
 navsim.egg-info
 build/
+tools/

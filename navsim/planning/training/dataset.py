@@ -9,7 +9,9 @@ import torch
 from tqdm import tqdm
 
 from navsim.common.dataloader import SceneLoader
+from navsim.common.dataclasses import Scene
 from navsim.planning.training.abstract_feature_target_builder import AbstractFeatureBuilder, AbstractTargetBuilder
+
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +189,22 @@ class Dataset(torch.utils.data.Dataset):
                         valid_cache_paths[token_path.name] = token_path
 
         return valid_cache_paths
+    
+    def _get_scene_with_token(self, token: str) -> Tuple[Scene, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        """
+        Helper function to compute feature / targets and save in cache.
+        :param token: unique identifier of scene to cache
+        """
+        features: Dict[str, torch.Tensor] = {}
+        targets: Dict[str, torch.Tensor] = {}
+        scene = self._scene_loader.get_scene_from_token(token)
+        agent_input = scene.get_agent_input()
+        for builder in self._feature_builders:
+            features.update(builder.compute_features(agent_input))
+        for builder in self._target_builders:
+            targets.update(builder.compute_targets(scene))
+
+        return (scene, features, targets)
 
     def _cache_scene_with_token(self, token: str) -> None:
         """

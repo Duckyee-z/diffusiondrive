@@ -175,6 +175,29 @@ def add_trajectory_to_bev_ax(ax: plt.Axes, trajectory: Trajectory, config: Dict[
     )
     return ax
 
+def add_trajectory_to_bev_ax_np(ax: plt.Axes, trajectory: np.array, config: Dict[str, Any]) -> plt.Axes:
+    """
+    Add trajectory poses as lint to plot
+    :param ax: matplotlib ax object
+    :param trajectory: navsim trajectory dataclass
+    :param config: dictionary with plot parameters
+    :return: ax with plot
+    """
+    poses = np.concatenate([np.array([[0, 0]]), trajectory])
+    ax.plot(
+        poses[:, 1],
+        poses[:, 0],
+        color=config["line_color"],
+        alpha=config["line_color_alpha"],
+        linewidth=config["line_width"],
+        linestyle=config["line_style"],
+        marker=config["marker"],
+        markersize=config["marker_size"],
+        markeredgecolor=config["marker_edge_color"],
+        zorder=config["zorder"],
+    )
+    return ax
+
 
 def add_oriented_box_to_bev_ax(
     ax: plt.Axes, box: OrientedBox, config: Dict[str, Any], add_heading: bool = True

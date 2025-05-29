@@ -24,6 +24,66 @@ CONFIG_PATH = "config/training"
 CONFIG_NAME = "default_training"
 
 
+anchor_minmax = torch.tensor([
+    # Point 0
+    [[-1.53, 3.92],   # x: min=-1.53, max=3.92
+     [-0.40, 0.98]],  # y: min=-0.40, max=0.98
+    # Point 1
+    [[-1.94, 4.79],
+     [-1.62, 2.16]],
+    # Point 2
+    [[-4.51, 9.96],
+     [-3.43, 3.96]],
+    # Point 3
+    [[-8.06, 10.24],
+     [-5.85, 6.59]],
+    # Point 4
+    [[-12.18, 10.73],
+     [-8.59, 9.93]],
+    # Point 5
+    [[-16.62, 14.17],
+     [-11.95, 13.63]],
+    # Point 6
+    [[-22.47, 18.02],
+     [-15.71, 17.83]],
+    # Point 7
+    [[-28.36, 22.24],
+     [-19.68, 22.32]]
+], dtype=torch.float32)
+
+
+
+def norm_odo(odo_info_fut, vec=anchor_minmax): # odo_info_fut ([64, 20, 8, 2])
+        """
+        对输入张量的每个点的x和y坐标进行Min-Max归一化。
+        args:
+            tensor (torch.Tensor): 形状为(B, L, 8, 2)的输入张量。
+            vec (torch.Tensor): 形状为(8, 2, 2)的极值张量, 其中vec[i, j, 0]为最小值, vec[i, j, 1]为最大值。
+        
+        return:
+            torch.Tensor: 归一化后的张量，形状与输入相同。
+        """
+        # 提取每个点的x和y的min、max
+        x_mins = vec[:, 0, 0].to(odo_info_fut.device)  # 形状 (8,)
+        x_maxs = vec[:, 0, 1].to(odo_info_fut.device)
+        y_mins = vec[:, 1, 0].to(odo_info_fut.device)
+        y_maxs = vec[:, 1, 1].to(odo_info_fut.device)
+
+        # 分离x和y坐标
+        x_coords = odo_info_fut[..., 0]  # 形状 (B, L, 8)
+        y_coords = odo_info_fut[..., 1]
+
+        # 计算归一化后的坐标，利用广播机制
+        x_range = x_maxs - x_mins
+        normalized_x = 10* (x_coords - x_mins[None, None, :]) / x_range[None, None, :] - 5
+
+        y_range = y_maxs - y_mins
+        normalized_y = 10* (y_coords - y_mins[None, None, :]) / y_range[None, None, :] - 5
+
+        # 合并结果并保持原有维度
+
+        return torch.stack([normalized_x, normalized_y], dim=-1)
+
 @hydra.main(config_path=CONFIG_PATH, config_name=CONFIG_NAME, version_base=None)
 def main(cfg: DictConfig) -> None:
     """
@@ -71,66 +131,52 @@ def main(cfg: DictConfig) -> None:
     logger.info("Num training samples: %d", len(train_data))
 
 
-    x_only_velo_traj_list = []
-    speed_velo_traj_list = []
-    ego_velo_traj_list = []
-    trajs_list = []
+    odo_bias_list = []
+    gt_list = []
+    speed_anchor_list = []
+    velo_list = []
 
     for it, batch in enumerate(tqdm(train_dataloader)):
         # print(it)
         features, targets = batch
-        now_ego_velo = features["status_feature"][..., 4:6]
+        n_trajs = 1
 
-        dt = 0.5
-        num_poses = targets['trajectory'].shape[1]
+        gt_trajs = targets.get('trajectory').float() 
+        velo_ego = features["status_feature"][..., 4:5]
+        velo = torch.stack([velo_ego, torch.zeros_like(velo_ego)], dim=-1)
+        speed_anchor = velo.unsqueeze(1) * torch.linspace(0.5, 4, steps=8).unsqueeze(0).unsqueeze(-1)
+        speed_anchor = speed_anchor.squeeze(1)
 
-        trajs = targets['trajectory'][...,:2].numpy() # torch.Size([64, 8, 2])
+        plan_anchor = torch.stack([gt_trajs[...,:2]-speed_anchor]*n_trajs, dim=1).float() # torch.Size([64, 20, 8, 2])
 
-        velo_now_x = now_ego_velo[..., 0]
+        # odo_bias = norm_odo(plan_anchor, vec=anchor_minmax)
 
-        x_only_velo = torch.stack([velo_now_x, torch.zeros_like(velo_now_x)], dim=-1).numpy()
+        gt_list.append(gt_trajs[...,:2].numpy())
 
-        
-        ego_velo = now_ego_velo.numpy()
+        speed_anchor_list.append(speed_anchor.numpy())
+        velo_list.append(velo.numpy())
 
-        t = np.linspace(0, 4, 9)
-        x_only_traj = (x_only_velo[:, np.newaxis, :] * t[np.newaxis, :, np.newaxis])[:,1:,:]
-        ego_velo_traj = (ego_velo[:, np.newaxis, :] * t[np.newaxis, :, np.newaxis])[:,1:,:]
-        # x_only_velo_traj = np.array(
-        #     [[(time_idx + 1) * dt * x_only_velo] for time_idx in range(num_poses)],
-        #     dtype=np.float32,
-        # )
-        # speed_velo_traj = np.array(
-        #     [[(time_idx + 1) * dt * speed_velo] for time_idx in range(num_poses)],
-        #     dtype=np.float32,
-        # )
+        # odo_bias_list.append(odo_bias)
 
-        # ego_velo_traj = np.array(
-        #     [[(time_idx + 1) * dt * ego_velo] for time_idx in range(num_poses)],
-        #     dtype=np.float32,
-        # )
-        x_only_velo_traj_list.append(x_only_traj)
-
-        ego_velo_traj_list.append(ego_velo_traj)
-        trajs_list.append(trajs)
 
 
     # train_acc_np, train_velo_np = np.concatenate(train_acc, axis=0), np.concatenate(train_velo, axis=0)
     # print(train_acc_np.shape, train_velo_np.shape)
-    x_only_velo_traj_list = np.concatenate(x_only_velo_traj_list, axis=0)
-    ego_velo_traj_list = np.concatenate(ego_velo_traj_list, axis=0)
-    trajs_list = np.concatenate(trajs_list, axis=0)
+    # odo_bias_list = np.concatenate(odo_bias_list, axis=0)
+    gt_list = np.concatenate(gt_list, axis=0)
+    velo_list = np.concatenate(velo_list, axis=0)
+    speed_anchor_list = np.concatenate(speed_anchor_list, axis=0)
 
-    print(x_only_velo_traj_list.shape, ego_velo_traj_list.shape, trajs_list.shape)
 
     train_dict = dict(
-        x_only_velo_traj_list=x_only_velo_traj_list,
-        speed_velo_traj_list=speed_velo_traj_list,
-        ego_velo_traj_list=ego_velo_traj_list,
-        trajs_list=trajs_list
+        gt_trajs=gt_list, 
+        # odo_bias_list=odo_bias_list,
+        speed_anchor_list=speed_anchor_list,
+        velo_list=velo_list
+
     )
     import pickle
-    with open("./tb_logs/speed_anchor.pkl", "wb") as f:
+    with open("./tb_logs/speed_anchor_data.pkl", "wb") as f:
         pickle.dump(train_dict, f)
 
 

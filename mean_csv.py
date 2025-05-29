@@ -21,7 +21,7 @@ def find_csv_files(folder_path):
     return csv_files
 
 
-def process_csv_files(csv_files, output_dir):
+def process_csv_files(csv_files, output_dir, csv_name):
     """处理CSV文件并提取指定数据"""
     # 确保输出目录存在
     os.makedirs(output_dir, exist_ok=True)
@@ -62,7 +62,7 @@ def process_csv_files(csv_files, output_dir):
         result_df = pd.concat(all_results, ignore_index=True)
         max_pdms_row = result_df.loc[result_df['PDMS'].idxmax()]
         # 保存到新文件
-        output_path = os.path.join(output_dir, 'extracted_results.csv')
+        output_path = os.path.join(output_dir, f'{csv_name}.csv')
         result_df.to_csv(output_path, index=False)
 
         print(max_pdms_row[['PDMS', 'NC', 'DAC', 'TTC', 'Comf.', 'EP']])
@@ -75,6 +75,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='查找指定目录中的所有CSV文件')
     parser.add_argument('--directory', help='要搜索的目标目录路径')
     parser.add_argument('--output', help='输出目录路径', default='./')
+    parser.add_argument('--name', help='文件名', default='extracted_results')
+
     
 
     args = parser.parse_args()
@@ -87,5 +89,5 @@ if __name__ == "__main__":
     print(f"\n共找到 {len(csv_files)} 个CSV文件")
     for file in csv_files:
         print(file)
-    process_csv_files(csv_files, args.output)
+    process_csv_files(csv_files, args.output, args.name)
     

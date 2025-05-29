@@ -1,21 +1,25 @@
 
 # agent_name=vddrivev2
 # agent_name=vdiffusiondrivev2_minmaxnorm
-agent_name=vddrivev2.3
+# agent_name=vddrivev2.3
+agent_name=speedanchorv4.1
 
-CUDA_VISIBLE_DEVICES=5 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
+CUDA_VISIBLE_DEVICES=2 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         agent=$agent_name \
         experiment_name=test_exp \
         train_test_split=navtrain  \
         split=trainval   \
-        cache_path="/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/training_cache/" \
+        cache_path="/home/users/zhiyu.zheng/workplace/e2ead/navsim_workplace/exp/training_cache/" \
         use_cache_without_dataset=True  \
         force_cache_computation=False \
-        debug=True \
         +agent.config.anchor_embed=True \
-        'trainer.params.max_epochs=15' \
-        +agent.config.use_mse_loss=True 
-        # +agent.config.with_query_as_embedding=True \
+        +agent.config.with_query_as_embedding=True \
+        trainer.params.max_epochs=1 \
+        +agent.config.norm_scale=5\
+        +agent.config.use_clamp=True\
+        debug=true
+        
+
         # 'trainer.params.max_epochs=15' \
         # +agent.config.use_mse_loss=True 
         # +agent.config.anchor_embed=True \
@@ -46,14 +50,25 @@ CUDA_VISIBLE_DEVICES=5 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_tra
 #         "agent.checkpoint_path=$escaped_path"\
 #         experiment_name=${agent_name}_eval
 
-
 # python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_data_analyse_ho.py \
 #         agent=$agent_name \
 #         experiment_name=$agent_name\
 #         train_test_split=navtrain  \
 #         split=trainval   \
 #         trainer.params.max_epochs=2 \
-#         cache_path=/horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/exp/training_cache_HO/ \
+#         cache_path=/home/users/zhiyu.zheng/workplace/e2ead/navsim_workplace/exp/training_cache \
 #         use_cache_without_dataset=True \
 #         force_cache_computation=False 
-        # debug=true
+        # debug=True 
+
+
+# python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_myvisual.py \
+#         agent=$agent_name \
+#         experiment_name=$agent_name\
+#         train_test_split=navtrain  \
+#         split=trainval   \
+#         trainer.params.max_epochs=2 \
+#         cache_path=/home/users/zhiyu.zheng/workplace/e2ead/navsim_workplace/exp/training_cache \
+#         use_cache_without_dataset=True \
+#         force_cache_computation=False 
+        # debug=True 

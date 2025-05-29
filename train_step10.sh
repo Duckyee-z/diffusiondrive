@@ -34,7 +34,8 @@ export NAVSIM_EXP_ROOT="/job_data"
 pip install -e . -i https://art-internal.hobot.cc/artifactory/api/pypi/pypi/simple --extra-index-url=http://pypi.hobot.cc/hobot-local/simple --trusted-host pypi.hobot.cc
 
 # agent_name=vanilla_diffusiondrive_agent
-agent_name=vddrivev2.3
+agent_name=speedanchorv4.1
+random_scale='1.0'
 
 HYDRA_FULL_ERROR=1 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         agent=$agent_name \
@@ -46,27 +47,12 @@ HYDRA_FULL_ERROR=1 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_trainin
         force_cache_computation=False \
         +agent.config.anchor_embed=True \
         +agent.config.with_query_as_embedding=True \
-        +agent.config.use_mse_loss=True 
-        # +agent.config.random_scale='0.5'
-        # dataloader.params.batch_size=128 
-        # debug=True 
-        # +agent.config.with_query_as_embedding=True
+        +agent.config.random_scale=${random_scale}\
+        +agent.config.norm_scale=1\
+        +agent.config.use_clamp=True\
+        # +lr=1.2e-4
+        # +agent.config.trajectory_weight=5 \
 
-        # +agent.config.anchor_embed_interact=True
-        # +agent.config.with_query_as_embedding=True
-
- 
-        # +agent.config.anchor_embed=True \
-        # +agent.config.anchor_embed_interact=True
-        # +agent.config.anchor_embed=True \
-        # +agent.config.with_query_as_embedding=True
-        # +agent.config.random_scale='0.2'
-
-        # +agent.config.infer_minus_anchor=False
-        # +agent.config.random_scale='0.5'
-        # anchor_embed_as_condition
-        # debug=True \
-        # 'trainer.params.max_epochs=10' \
 
 # ckpt_paths=$(find "$NAVSIM_EXP_ROOT/" -type f -name "*.ckpt")
 rsync -avh --progress --inplace /horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/metric_cache.tar.gz ${WORKING_PATH}
@@ -94,13 +80,50 @@ for ckpt_path in "${ckpt_paths[@]}"; do
         experiment_name=${agent_name}_eval \
         +agent.config.anchor_embed=True \
         +agent.config.with_query_as_embedding=True \
-        +agent.config.use_mse_loss=True 
-        # +agent.config.random_scale='0.5'
-        # +agent.config.use_mse_loss=True 
-        # +agent.config.with_query_as_embedding=True
+        +agent.config.random_scale=${random_scale}\
+        +agent.config.norm_scale=1\
+        +agent.config.use_clamp=True
 
-        # +agent.config.anchor_embed_interact=True
-        # +agent.config.with_query_as_embedding=True
+    sleep 2s
+
+    python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+        train_test_split=navtest \
+        agent=$agent_name \
+        worker=ray_distributed \
+        "agent.checkpoint_path=$escaped_path"\
+        metric_cache_path="${WORKING_PATH}/metric_cache/" \
+        experiment_name=${agent_name}_eval_step10 \
+        +agent.config.infer_step_num=10 \
+        +agent.config.anchor_embed=True \
+        +agent.config.with_query_as_embedding=True \
+        +agent.config.random_scale=${random_scale}\
+        +agent.config.norm_scale=1\
+        +agent.config.use_clamp=True
+        
+
+    sleep 2s
+
+    python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+        train_test_split=navtest \
+        agent=$agent_name \
+        worker=ray_distributed \
+        "agent.checkpoint_path=$escaped_path"\
+        metric_cache_path="${WORKING_PATH}/metric_cache/" \
+        experiment_name=${agent_name}_eval_step5 \
+        +agent.config.infer_step_num=5 \
+        +agent.config.anchor_embed=True \
+        +agent.config.with_query_as_embedding=True \
+        +agent.config.random_scale=${random_scale}\
+        +agent.config.norm_scale=1\
+        +agent.config.use_clamp=True
+        
+
+    sleep 2s
+
 done
 
-python mean_csv.py --directory /job_data/${agent_name}_eval/ --output /job_data/
+python mean_csv.py --directory /job_data/${agent_name}_eval/ --output /job_data/ --name step2
+python mean_csv.py --directory /job_data/${agent_name}_eval_step5/ --output /job_data/ --name step5
+python mean_csv.py --directory /job_data/${agent_name}_eval_step10/ --output /job_data/ --name step10
+
+

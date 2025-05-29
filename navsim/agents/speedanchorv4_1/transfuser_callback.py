@@ -14,8 +14,8 @@ from nuplan.common.actor_state.oriented_box import OrientedBox
 from nuplan.common.actor_state.state_representation import StateSE2
 from nuplan.common.maps.abstract_map import SemanticMapLayer
 
-from navsim.agents.vddrivev2_3.transfuser_features import BoundingBox2DIndex
-from navsim.agents.vddrivev2_3.transfuser_config import TransfuserConfig
+from navsim.agents.speedanchorv4_1.transfuser_features import BoundingBox2DIndex
+from navsim.agents.speedanchorv4_1.transfuser_config import TransfuserConfig
 from navsim.visualization.config import MAP_LAYER_CONFIG, AGENT_CONFIG
 
 

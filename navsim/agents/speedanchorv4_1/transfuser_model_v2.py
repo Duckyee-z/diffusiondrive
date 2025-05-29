@@ -3,15 +3,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import copy
-from navsim.agents.vddrivev2_3.transfuser_config import TransfuserConfig
-from navsim.agents.vddrivev2_3.transfuser_backbone import TransfuserBackbone
-from navsim.agents.vddrivev2_3.transfuser_features import BoundingBox2DIndex
+from navsim.agents.speedanchorv4_1.transfuser_config import TransfuserConfig
+from navsim.agents.speedanchorv4_1.transfuser_backbone import TransfuserBackbone
+from navsim.agents.speedanchorv4_1.transfuser_features import BoundingBox2DIndex
 from navsim.common.enums import StateSE2Index
 from diffusers.schedulers import DDIMScheduler
-from navsim.agents.vddrivev2_3.modules.conditional_unet1d import ConditionalUnet1D,SinusoidalPosEmb
+from navsim.agents.speedanchorv4_1.modules.conditional_unet1d import ConditionalUnet1D,SinusoidalPosEmb
 import torch.nn.functional as F
-from navsim.agents.vddrivev2_3.modules.blocks import linear_relu_ln,bias_init_with_prob, gen_sineembed_for_position, GridSampleCrossBEVAttention
-from navsim.agents.vddrivev2_3.modules.multimodal_loss import LossComputer
+from navsim.agents.speedanchorv4_1.modules.blocks import linear_relu_ln,bias_init_with_prob, gen_sineembed_for_position, GridSampleCrossBEVAttention
+from navsim.agents.speedanchorv4_1.modules.multimodal_loss import LossComputer
 from torch.nn import TransformerDecoder,TransformerDecoderLayer
 from typing import Any, List, Dict, Optional, Union
 
@@ -45,32 +45,6 @@ anchor_minmax = torch.tensor([
      [-19.68, 22.32]]
 ], dtype=torch.float32)
 
-# anchor_minmax_new = torch.tensor([
-#     [[ -1.5300,   3.9200],
-#         [ -0.4000,   0.9800]],
-
-#     [[ -1.9400,   4.7900],
-#         [ -1.6200,   2.1600]],
-
-#     [[ -4.5100,   9.9600],
-#         [ -3.4300,   3.9600]],
-
-#     [[ -8.0600,  10.2400],
-#         [ -5.8500,   6.5900]],
-
-#     [[-12.1800,  10.7300],
-#         [ -8.5900,   9.9300]],
-
-#     [[-16.6200,  14.1700],
-#         [-11.9500,  13.6300]],
-
-#     [[-22.4700,  18.0200],
-#         [-15.7100,  17.8300]],
-
-#     [[-28.3600,  22.2400],
-#         [-19.6800,  22.3200]]
-
-# ], dtype=torch.float32)
 
 point_minmax = torch.tensor([
     # Point 0
@@ -704,12 +678,15 @@ class TrajectoryHead(nn.Module):
             noisy_traj_points = torch.clamp(noisy_traj_points, min=-1*self.config.norm_scale, max=1*self.config.norm_scale)
         noisy_traj_points = self.denorm_odo(noisy_traj_points, vec=anchor_minmax)
         noisy_traj_points = noisy_traj_points.view(bs, self.n_trajs, 8, 2) # torch.Size([64, 20, 8, 2])
+        speed_anchor_stacked=speed_anchor.repeat(1, self.n_trajs, 1, 1).view(bs, self.n_trajs, 8, 2) # torch.Size([64, 20, 8, 2])
+        traj_points = torch.concat([noisy_traj_points, speed_anchor_stacked], dim=1) # torch.Size([64, 40, 8, 4])
 
         # 2. proj noisy_traj_points to the query
-        traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64) # torch.Size([64, 20, 8, 64])
+        traj_pos_embed = gen_sineembed_for_position(traj_points,hidden_dim=64) # torch.Size([64, 20, 8, 64])
         traj_pos_embed = traj_pos_embed.flatten(-2) # torch.Size([64, 20, 8, 512])
         traj_feature = self.plan_anchor_encoder(traj_pos_embed) # torch.Size([64, 20, 256])
-        traj_feature = traj_feature.view(bs,self.n_trajs,-1) # torch.Size([64, 20, 256])
+        traj_feature = traj_feature.view(bs,self.n_trajs*2,-1) # torch.Size([64, 20, 256])
+        traj_feature, anchor_embedding = torch.chunk(traj_feature, 2, dim=1) # torch.Size([64, 20, 256]), torch.Size([64, 20, 256])
 
 
         # 3. embed the timesteps
@@ -717,7 +694,7 @@ class TrajectoryHead(nn.Module):
         time_embed = time_embed.view(bs,self.n_trajs,-1) # torch.Size([64, 20, 256])
 
         if self.config.anchor_embed:
-            time_embed = torch.concat([time_embed, traj_feature], dim=-1).to(device) 
+            time_embed = torch.concat([time_embed, anchor_embedding], dim=-1).to(device) 
             time_embed = self.anchor_embed(time_embed)
             if self.config.with_query_as_embedding:
                 ego_query = self.cross_attn(ego_query, agents_query, agents_query, skip=ego_query)
@@ -772,6 +749,8 @@ class TrajectoryHead(nn.Module):
         velo = torch.stack([velo_ego, torch.zeros_like(velo_ego)], dim=-1).to(device)
         speed_anchor = velo.unsqueeze(1) * torch.linspace(0.5, 4, steps=8).unsqueeze(0).unsqueeze(-1).to(device).float()
         # 1. add noise to the plan anchor
+        speed_anchor_stacked=speed_anchor
+
 
         plan_anchor = torch.randn((bs, 1, 8, 2)).to(device) * self.config.random_scale
         if self.config.infer_minus_anchor:
@@ -791,10 +770,13 @@ class TrajectoryHead(nn.Module):
                 x_boxes = img
             noisy_traj_points = self.denorm_odo(x_boxes, vec=anchor_minmax)
             # 2. proj noisy_traj_points to the query
-            traj_pos_embed = gen_sineembed_for_position(noisy_traj_points,hidden_dim=64)
+            traj_points = torch.concat([noisy_traj_points, speed_anchor_stacked], dim=1) # torch.Size([64, 40, 8, 4])
+            traj_pos_embed = gen_sineembed_for_position(traj_points,hidden_dim=64)
             traj_pos_embed = traj_pos_embed.flatten(-2)
             traj_feature = self.plan_anchor_encoder(traj_pos_embed)
-            traj_feature = traj_feature.view(bs,ego_fut_mode,-1)
+            traj_feature = traj_feature.view(bs,ego_fut_mode*2,-1)
+            traj_feature, anchor_embedding = torch.chunk(traj_feature, 2, dim=1) # torch.Size([64, 20, 256]), torch.Size([64, 20, 256])
+
 
             timesteps = k
             if not torch.is_tensor(timesteps):
@@ -809,7 +791,7 @@ class TrajectoryHead(nn.Module):
             time_embed = time_embed.view(bs,1,-1)
 
             if self.config.anchor_embed:
-                time_embed = torch.concat([time_embed, traj_feature], dim=-1).to(device) 
+                time_embed = torch.concat([time_embed, anchor_embedding], dim=-1).to(device) 
                 time_embed = self.anchor_embed(time_embed)
                 if self.config.with_query_as_embedding:
                     ego_query = self.cross_attn(ego_query, agents_query, agents_query, skip=ego_query)
@@ -833,12 +815,12 @@ class TrajectoryHead(nn.Module):
                 sample=img
             ).prev_sample
 
-        # best_traj = torch.concatenate([
-        #         poses_reg[...,0:2] + speed_anchor, 
-        #         poses_reg[...,2:3]
-        #     ],dim=-1).squeeze(1)
+        best_traj = torch.concatenate([
+                poses_reg[...,0:2] + speed_anchor, 
+                poses_reg[...,2:3]
+            ],dim=-1).squeeze(1)
 
-        return {"trajectory": traj_list[self.config.output_result].squeeze(1)}
+        return {"trajectory":best_traj.squeeze(1)}
     
 
     def forward_train(self, ego_query, agents_query, bev_feature, bev_spatial_shape, status_encoding, status_feature, targets=None, global_img=None) -> Dict[str, torch.Tensor]:
