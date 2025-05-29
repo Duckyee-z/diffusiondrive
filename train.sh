@@ -12,11 +12,9 @@ CUDA_VISIBLE_DEVICES=2 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_tra
         cache_path="/home/users/zhiyu.zheng/workplace/e2ead/navsim_workplace/exp/training_cache/" \
         use_cache_without_dataset=True  \
         force_cache_computation=False \
-        +agent.config.anchor_embed=True \
-        +agent.config.with_query_as_embedding=True \
-        trainer.params.max_epochs=1 \
         +agent.config.norm_scale=5\
         +agent.config.use_clamp=True\
+        +agent.config.output_result=trajectory_500\
         debug=true
         
 

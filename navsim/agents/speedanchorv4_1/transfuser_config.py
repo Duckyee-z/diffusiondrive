@@ -96,7 +96,7 @@ class TransfuserConfig:
     use_mse_loss: bool = False
     use_clamp: bool = True
     norm_scale: int = 1
-    output_result: Literal["trajectory_500","trajectory_0"] = "trajectory_0"
+    output_result: Literal["trajectory_500","trajectory_0"] = None
     truncated_vx: bool = False
 
     agent_class_weight: float = 10.0

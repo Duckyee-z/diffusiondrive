@@ -1,0 +1,95 @@
+#!/bin/bash
+source scripts/01_env.sh
+cd ${WORKING_PATH}
+agent_name=speedanchorv4.1
+random_scale='1.0'
+
+python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
+        agent=$agent_name \
+        experiment_name=${agent_name} \
+        train_test_split=navtrain  \
+        split=trainval   \
+        cache_path="${WORKING_PATH}/training_cache/" \
+        use_cache_without_dataset=True  \
+        force_cache_computation=False \
+        +agent.config.random_scale=${random_scale}\
+        +agent.config.norm_scale=1\
+        +agent.config.use_clamp=True
+        # +agent.config.output_result=trajectory_500
+        # +lr=1.2e-4
+        # +agent.config.trajectory_weight=5 \
+
+
+# ckpt_paths=$(find "$NAVSIM_EXP_ROOT/" -type f -name "*.ckpt")
+rsync -avh --progress --inplace /horizon-bucket/saturn_v_dev/01_users/zhiyu.zheng/01_dataset/01_E2EAD/01_nuscenes/metric_cache.tar.gz ${WORKING_PATH}
+tar -zxf metric_cache.tar.gz -C ${WORKING_PATH}
+
+
+ckpt_paths=()
+while IFS= read -r -d $'\0' file; do
+    ckpt_paths+=("$file")
+done < <(find "$NAVSIM_EXP_ROOT/" -type f -name "*.ckpt" -print0)
+# 打印所有找到的ckpt路径
+printf '%s\n' "${ckpt_paths[@]}"
+
+# 遍历所有找到的 .ckpt 文件
+for ckpt_path in "${ckpt_paths[@]}"; do
+    # 转义路径中的特殊字符（特别是 =）
+    escaped_path=${ckpt_path//=/\\=}
+    echo "验证: $escaped_path"
+
+    python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+        train_test_split=navtest \
+        agent=$agent_name \
+        worker=ray_distributed \
+        "agent.checkpoint_path=$escaped_path"\
+        metric_cache_path="${WORKING_PATH}/metric_cache/" \
+        experiment_name=${agent_name}_eval2 \
+        +agent.config.random_scale=${random_scale}\
+        +agent.config.norm_scale=1\
+        +agent.config.use_clamp=True &
+    python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+        train_test_split=navtest \
+        agent=$agent_name \
+        worker=ray_distributed \
+        "agent.checkpoint_path=$escaped_path"\
+        metric_cache_path="${WORKING_PATH}/metric_cache/" \
+        experiment_name=${agent_name}_eval2_500 \
+        +agent.config.random_scale=${random_scale}\
+        +agent.config.norm_scale=1\
+        +agent.config.use_clamp=True\
+        +agent.config.output_result=trajectory_500 &
+    python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+        train_test_split=navtest \
+        agent=$agent_name \
+        worker=ray_distributed \
+        "agent.checkpoint_path=$escaped_path"\
+        metric_cache_path="${WORKING_PATH}/metric_cache/" \
+        experiment_name=${agent_name}_eval2_0 \
+        +agent.config.random_scale=${random_scale}\
+        +agent.config.norm_scale=1\
+        +agent.config.use_clamp=True\
+        +agent.config.output_result=trajectory_0 &
+    python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+        train_test_split=navtest \
+        agent=$agent_name \
+        worker=ray_distributed \
+        "agent.checkpoint_path=$escaped_path"\
+        metric_cache_path="${WORKING_PATH}/metric_cache/" \
+        experiment_name=${agent_name}_eval_step10 \
+        +agent.config.infer_step_num=10 \
+        +agent.config.random_scale=${random_scale}\
+        +agent.config.norm_scale=1\
+        +agent.config.use_clamp=True
+        
+    sleep 2s
+
+
+done
+
+python mean_csv.py --directory /job_data/${agent_name}_eval2/ --output /job_data/ --name step2
+python mean_csv.py --directory /job_data/${agent_name}_eval2_500/ --output /job_data/ --name step2_500
+python mean_csv.py --directory /job_data/${agent_name}_eval2_0/ --output /job_data/ --name step2_0
+python mean_csv.py --directory /job_data/${agent_name}_eval_step10/ --output /job_data/ --name step10
+
+
