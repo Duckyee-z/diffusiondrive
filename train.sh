@@ -2,9 +2,11 @@
 # agent_name=vddrivev2
 # agent_name=vdiffusiondrivev2_minmaxnorm
 # agent_name=vddrivev2.3
-agent_name=speedanchorv4.1
 
-CUDA_VISIBLE_DEVICES=2 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
+
+
+agent_name=speedanchorv4.3
+CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         agent=$agent_name \
         experiment_name=test_exp \
         train_test_split=navtrain  \
@@ -14,7 +16,7 @@ CUDA_VISIBLE_DEVICES=2 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_tra
         force_cache_computation=False \
         +agent.config.norm_scale=5\
         +agent.config.use_clamp=True\
-        +agent.config.output_result=trajectory_500\
+        +agent.config.add_status_coding_to_condition=True \
         debug=true
         
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 source scripts/01_env.sh
 cd ${WORKING_PATH}
-agent_name=speedanchorv4.1
+agent_name=speedanchorv4.3
 random_scale='1.0'
 
 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
@@ -15,6 +15,7 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         +agent.config.random_scale=${random_scale}\
         +agent.config.norm_scale=1\
         +agent.config.use_clamp=True
+        # +agent.config.add_status_coding_to_condition=True 
         # +agent.config.output_result=trajectory_500
         # +lr=1.2e-4
         # +agent.config.trajectory_weight=5 \
@@ -47,7 +48,7 @@ for ckpt_path in "${ckpt_paths[@]}"; do
         experiment_name=${agent_name}_eval2 \
         +agent.config.random_scale=${random_scale}\
         +agent.config.norm_scale=1\
-        +agent.config.use_clamp=True &
+        +agent.config.use_clamp=True 
     python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
         train_test_split=navtest \
         agent=$agent_name \
@@ -58,18 +59,7 @@ for ckpt_path in "${ckpt_paths[@]}"; do
         +agent.config.random_scale=${random_scale}\
         +agent.config.norm_scale=1\
         +agent.config.use_clamp=True\
-        +agent.config.output_result=trajectory_500 &
-    python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
-        train_test_split=navtest \
-        agent=$agent_name \
-        worker=ray_distributed \
-        "agent.checkpoint_path=$escaped_path"\
-        metric_cache_path="${WORKING_PATH}/metric_cache/" \
-        experiment_name=${agent_name}_eval2_0 \
-        +agent.config.random_scale=${random_scale}\
-        +agent.config.norm_scale=1\
-        +agent.config.use_clamp=True\
-        +agent.config.output_result=trajectory_0 &
+        +agent.config.output_result=trajectory_500 
     python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
         train_test_split=navtest \
         agent=$agent_name \
@@ -81,6 +71,18 @@ for ckpt_path in "${ckpt_paths[@]}"; do
         +agent.config.random_scale=${random_scale}\
         +agent.config.norm_scale=1\
         +agent.config.use_clamp=True
+    # python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+    #     train_test_split=navtest \
+    #     agent=$agent_name \
+    #     worker=ray_distributed \
+    #     "agent.checkpoint_path=$escaped_path"\
+    #     metric_cache_path="${WORKING_PATH}/metric_cache/" \
+    #     experiment_name=${agent_name}_eval2_0 \
+    #     +agent.config.random_scale=${random_scale}\
+    #     +agent.config.norm_scale=1\
+    #     +agent.config.use_clamp=True\
+    #     +agent.config.output_result=trajectory_0 
+
         
     sleep 2s
 
@@ -89,7 +91,7 @@ done
 
 python mean_csv.py --directory /job_data/${agent_name}_eval2/ --output /job_data/ --name step2
 python mean_csv.py --directory /job_data/${agent_name}_eval2_500/ --output /job_data/ --name step2_500
-python mean_csv.py --directory /job_data/${agent_name}_eval2_0/ --output /job_data/ --name step2_0
+# python mean_csv.py --directory /job_data/${agent_name}_eval2_0/ --output /job_data/ --name step2_0
 python mean_csv.py --directory /job_data/${agent_name}_eval_step10/ --output /job_data/ --name step10
 
 
