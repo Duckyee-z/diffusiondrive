@@ -3,6 +3,7 @@ source scripts/01_env.sh
 cd ${WORKING_PATH}
 agent_name=speedanchorv4.3
 random_scale='1.0'
+norm_scale=1
 
 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         agent=$agent_name \
@@ -13,7 +14,7 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         use_cache_without_dataset=True  \
         force_cache_computation=False \
         +agent.config.random_scale=${random_scale}\
-        +agent.config.norm_scale=1\
+        +agent.config.norm_scale=${norm_scale}\
         +agent.config.use_clamp=True
         # +agent.config.add_status_coding_to_condition=True 
         # +agent.config.output_result=trajectory_500
@@ -57,7 +58,7 @@ for ckpt_path in "${ckpt_paths[@]}"; do
         metric_cache_path="${WORKING_PATH}/metric_cache/" \
         experiment_name=${agent_name}_eval2_500 \
         +agent.config.random_scale=${random_scale}\
-        +agent.config.norm_scale=1\
+        +agent.config.norm_scale=${norm_scale}\
         +agent.config.use_clamp=True\
         +agent.config.output_result=trajectory_500 
     python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
@@ -69,7 +70,7 @@ for ckpt_path in "${ckpt_paths[@]}"; do
         experiment_name=${agent_name}_eval_step10 \
         +agent.config.infer_step_num=10 \
         +agent.config.random_scale=${random_scale}\
-        +agent.config.norm_scale=1\
+        +agent.config.norm_scale=${norm_scale}\
         +agent.config.use_clamp=True
     # python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
     #     train_test_split=navtest \

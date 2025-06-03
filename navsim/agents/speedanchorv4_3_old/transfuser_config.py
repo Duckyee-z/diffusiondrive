@@ -98,6 +98,7 @@ class TransfuserConfig:
     norm_scale: int = 1
     output_result: Literal["trajectory_500","trajectory_0"] = None
     truncated_vx: bool = False
+    add_status_coding_to_condition: bool = False
 
     agent_class_weight: float = 10.0
     agent_box_weight: float = 1.0

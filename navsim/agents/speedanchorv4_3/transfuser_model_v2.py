@@ -73,7 +73,6 @@ class V2TransfuserModel(nn.Module):
         logger.info("norm_scale: {}".format(config.norm_scale))
         logger.info("Truncated vx: {}".format(config.truncated_vx))
         logger.info("output_result: {}".format(config.output_result))
-        logger.info("add_status_coding_to_condition: {}".format(config.add_status_coding_to_condition))
 
         self._keyval_embedding = nn.Embedding(8**2 + 1, config.tf_d_model)  # 8x8 feature grid + trajectory
         self._query_embedding = nn.Embedding(sum(self._query_splits), config.tf_d_model)
@@ -386,11 +385,11 @@ class CustomTransformerDecoderLayer(nn.Module):
         
         # 4.9 predict the offset & heading
         poses_reg = self.task_decoder(bias_feature) #bs,20,8,3; bs,20
-        # poses_reg[...,:2] = poses_reg[...,:2]+noisy_odo_bias
+        # poses_reg[...,:2] = poses_reg[...,:2]+noisy_traj_points
         poses_reg[...,:2] = poses_reg[...,:2]
         poses_reg[..., StateSE2Index.HEADING] = poses_reg[..., StateSE2Index.HEADING].tanh() * np.pi
 
-        return poses_reg
+        return poses_reg, bias_feature
     
 def _get_clones(module, N):
     # FIXME: copy.deepcopy() is not defined on nn.module
@@ -482,17 +481,17 @@ class CustomTransformerDecoder(nn.Module):
                 time_embed, 
                 status_encoding,
                 global_img=None):
-        poses_reg_list = []
+        bias_pred_list = []
 
-        traj_points = noisy_odo_bias + speed_anchor
-        normed_bias = self.norm_odo(noisy_odo_bias, vec=anchor_minmax) # [64, 20, 8, 2]
+        noisy_traj_points = speed_anchor + noisy_odo_bias
         for mod in self.layers:
-            poses_reg = mod(bias_feature, normed_bias, traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
-            poses_reg_list.append(poses_reg)
-            # normed_bias = poses_reg[...,:2]
-            # 这里要denorm
-            traj_points = self.denorm_odo(poses_reg[...,:2].clone().detach(), vec=anchor_minmax) + speed_anchor.clone().detach()
-        return poses_reg_list
+            # test1 迭代query和traj point/ test2 只迭代query / test3 只迭代 traj point
+            bias_pred, bias_feature1 = mod(bias_feature, noisy_odo_bias, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
+            bias_pred_list.append(bias_pred)
+
+            noisy_traj_points = (self.denorm_odo(bias_pred[...,:2], vec=anchor_minmax) + speed_anchor).clone().detach() # bs,20,8,2
+            # traj_points = poses_reg[...,:2].clone().detach()
+        return bias_pred_list
     
 class TransformerBlock(nn.Module):
     def __init__(self, embed_dims=256, drop_ratio=0.1):
@@ -588,19 +587,11 @@ class TrajectoryHead(nn.Module):
             nn.Linear(d_model * 2, d_model),
         )
         self.cross_attn = TransformerBlock(embed_dims=d_model, drop_ratio=0.1)
-
-        if self.config.add_status_coding_to_condition:
-            self.fusion_embed = nn.Sequential(
-            nn.Linear(d_model * 3, d_model * 4),
-            nn.ReLU(),
-            nn.Linear(d_model * 4, d_model),
-            )
-        else:
-            self.fusion_embed = nn.Sequential(
+        self.fusion_embed = nn.Sequential(
             nn.Linear(d_model * 2, d_model * 2),
             nn.ReLU(),
             nn.Linear(d_model * 2, d_model),
-            )
+        )
         # if self.config.anchor_embed_interact:
         #     self.anchor_attn = TransformerBlock(embed_dims=d_model, drop_ratio=0.1)
 
@@ -707,25 +698,21 @@ class TrajectoryHead(nn.Module):
         noisy_odo_bias = noisy_odo_bias.view(bs, n_trajs, 8, 2) # torch.Size([64, 20, 8, 2])
         speed_anchor_stacked=speed_anchor.repeat(1, n_trajs, 1, 1).view(bs, n_trajs, 8, 2) # torch.Size([64, 20, 8, 2])
 
-        bias_anchor_points = torch.concat([noisy_odo_bias, speed_anchor_stacked], dim=1) # torch.Size([64, 40, 8, 2])
+        bias_anchor_points = torch.concat([noisy_odo_bias, speed_anchor_stacked], dim=1) # torch.Size([64, 40, 8, 4])
         bias_anchor_embed = gen_sineembed_for_position(bias_anchor_points,hidden_dim=64) # torch.Size([64, 20, 8, 64])
-        bias_anchor_embed = bias_anchor_embed.flatten(-2) # torch.Size([64, 40, 512])
-        bias_anchor_feature = self.plan_anchor_encoder(bias_anchor_embed) # torch.Size([64, 40, 256])
-        bias_anchor_feature = bias_anchor_feature.view(bs,n_trajs*2,-1) # torch.Size([64, 40, 256])
+        bias_anchor_embed = bias_anchor_embed.flatten(-2) # torch.Size([64, 20, 8, 512])
+        bias_anchor_feature = self.plan_anchor_encoder(bias_anchor_embed) # torch.Size([64, 20, 256])
+        bias_anchor_feature = bias_anchor_feature.view(bs,n_trajs*2,-1) # torch.Size([64, 20, 256])
         bias_feature, anchor_feature = torch.chunk(bias_anchor_feature, 2, dim=1) # torch.Size([64, 20, 256]), torch.Size([64, 20, 256])
 
-        # 3. embed the timesteps 这一块儿的网络有些冗余，之后修改
+        # 3. embed the timesteps
         time_embed = self.time_mlp(timesteps) # torch.Size([1280, 256])
         time_embed = time_embed.view(bs,n_trajs,-1) # torch.Size([64, 20, 256])
         time_embed = torch.concat([time_embed, anchor_feature], dim=-1).to(device) 
         time_embed = self.anchor_embedder(time_embed)
         ego_query = self.cross_attn(ego_query, agents_query, agents_query, skip=ego_query)
         ego_query = ego_query.repeat(1, n_trajs, 1)
-        if self.config.add_status_coding_to_condition:
-            status_encoding_stack = status_encoding.repeat(1, n_trajs, 1)
-            time_embed = self.fusion_embed(torch.cat([ego_query, time_embed, status_encoding_stack], dim=-1))
-        else:
-            time_embed = self.fusion_embed(torch.cat([ego_query, time_embed], dim=-1))
+        time_embed = self.fusion_embed(torch.cat([ego_query, time_embed], dim=-1))
 
         # noisy_traj_points = noisy_odo_bias + speed_anchor_stacked
         # 4. begin the stacked decoder
@@ -808,12 +795,7 @@ class TrajectoryHead(nn.Module):
             time_embed = torch.concat([time_embed, anchor_feature], dim=-1).to(device) 
             time_embed = self.anchor_embedder(time_embed)
             ego_query = self.cross_attn(ego_query, agents_query, agents_query, skip=ego_query)
-
-            if self.config.add_status_coding_to_condition:
-                status_encoding_stack = status_encoding
-                time_embed = self.fusion_embed(torch.cat([ego_query, time_embed, status_encoding_stack], dim=-1))
-            else:
-                time_embed = self.fusion_embed(torch.cat([ego_query, time_embed], dim=-1))
+            time_embed = self.fusion_embed(torch.cat([ego_query, time_embed], dim=-1))
 
             # noisy_traj_points = noisy_odo_bias + speed_anchor_stacked
 

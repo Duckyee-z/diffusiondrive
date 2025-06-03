@@ -16,7 +16,6 @@ CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_tra
         force_cache_computation=False \
         +agent.config.norm_scale=5\
         +agent.config.use_clamp=True\
-        +agent.config.add_status_coding_to_condition=True \
         debug=true
         
 
