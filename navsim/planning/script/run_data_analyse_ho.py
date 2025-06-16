@@ -135,6 +135,7 @@ def main(cfg: DictConfig) -> None:
     gt_list = []
     speed_anchor_list = []
     velo_list = []
+    driving_command_list = []
 
     for it, batch in enumerate(tqdm(train_dataloader)):
         # print(it)
@@ -142,6 +143,7 @@ def main(cfg: DictConfig) -> None:
         n_trajs = 1
 
         gt_trajs = targets.get('trajectory').float() 
+        driving_command =  features["status_feature"][..., :4].numpy()
         velo_ego = features["status_feature"][..., 4:5]
         velo = torch.stack([velo_ego, torch.zeros_like(velo_ego)], dim=-1)
         speed_anchor = velo.unsqueeze(1) * torch.linspace(0.5, 4, steps=8).unsqueeze(0).unsqueeze(-1)
@@ -150,13 +152,13 @@ def main(cfg: DictConfig) -> None:
         plan_anchor = torch.stack([gt_trajs[...,:2]-speed_anchor]*n_trajs, dim=1).float() # torch.Size([64, 20, 8, 2])
 
         # odo_bias = norm_odo(plan_anchor, vec=anchor_minmax)
+        odo_bias = (gt_trajs[...,:2]-speed_anchor).numpy()
 
         gt_list.append(gt_trajs[...,:2].numpy())
-
         speed_anchor_list.append(speed_anchor.numpy())
         velo_list.append(velo.numpy())
-
-        # odo_bias_list.append(odo_bias)
+        odo_bias_list.append(odo_bias)
+        driving_command_list.append(driving_command)
 
 
 
@@ -166,14 +168,15 @@ def main(cfg: DictConfig) -> None:
     gt_list = np.concatenate(gt_list, axis=0)
     velo_list = np.concatenate(velo_list, axis=0)
     speed_anchor_list = np.concatenate(speed_anchor_list, axis=0)
-
+    odo_bias_list = np.concatenate(odo_bias_list, axis=0)
+    driving_command_list = np.concatenate(driving_command_list, axis=0)
 
     train_dict = dict(
         gt_trajs=gt_list, 
-        # odo_bias_list=odo_bias_list,
+        velo_list=velo_list,
         speed_anchor_list=speed_anchor_list,
-        velo_list=velo_list
-
+        odo_bias_list=odo_bias_list,
+        driving_command_list = driving_command_list
     )
     import pickle
     with open("./tb_logs/speed_anchor_data.pkl", "wb") as f:

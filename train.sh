@@ -6,17 +6,26 @@
 
 
 agent_name=speedanchorv4.3
-CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
-        agent=$agent_name \
-        experiment_name=test_exp \
-        train_test_split=navtrain  \
-        split=trainval   \
-        cache_path="/home/users/zhiyu.zheng/workplace/e2ead/navsim_workplace/exp/training_cache/" \
-        use_cache_without_dataset=True  \
-        force_cache_computation=False \
-        +agent.config.norm_scale=5\
-        +agent.config.use_clamp=True\
-        debug=true
+# HYDRA_FULL_ERROR=1 CUDA_VISIBLE_DEVICES=3 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
+#         agent=$agent_name \
+#         experiment_name=test_exp \
+#         train_test_split=navtrain  \
+#         split=trainval   \
+#         cache_path="/home/users/zhiyu.zheng/workplace/e2ead/navsim_workplace/exp/training_cache/" \
+#         use_cache_without_dataset=True  \
+#         force_cache_computation=False \
+#         +agent.config.norm_scale=1\
+#         +agent.config.random_scale=1.0\
+#         +agent.config.use_clamp=True \
+#         +agent.config.use_manual_timesteps=True\
+#         +agent.config.manual_timesteps=\'750,250\' \
+#         debug=True
+
+        # +agent.config.use_different_loss_weight=True 
+        # +agent.config.trajectory_weight=10
+        # +agent.config.use_mse_loss=True \
+        # +agent.config.odo_loss=True\
+        # debug=true
         
 
         # 'trainer.params.max_epochs=15' \
@@ -49,15 +58,15 @@ CUDA_VISIBLE_DEVICES=6 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_tra
 #         "agent.checkpoint_path=$escaped_path"\
 #         experiment_name=${agent_name}_eval
 
-# python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_data_analyse_ho.py \
-#         agent=$agent_name \
-#         experiment_name=$agent_name\
-#         train_test_split=navtrain  \
-#         split=trainval   \
-#         trainer.params.max_epochs=2 \
-#         cache_path=/home/users/zhiyu.zheng/workplace/e2ead/navsim_workplace/exp/training_cache \
-#         use_cache_without_dataset=True \
-#         force_cache_computation=False 
+python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_data_analyse_ho.py \
+        agent=$agent_name \
+        experiment_name=$agent_name\
+        train_test_split=navtrain  \
+        split=trainval   \
+        trainer.params.max_epochs=2 \
+        cache_path=/home/users/zhiyu.zheng/workplace/e2ead/navsim_workplace/exp/training_cache \
+        use_cache_without_dataset=True \
+        force_cache_computation=False 
         # debug=True 
 
 

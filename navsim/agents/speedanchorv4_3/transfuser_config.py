@@ -98,6 +98,13 @@ class TransfuserConfig:
     norm_scale: int = 1
     output_result: Literal["trajectory_500","trajectory_0"] = None
     truncated_vx: bool = False
+    odo_loss: bool = False
+    use_different_loss_weight: bool = False
+    num_train_timesteps: int = 1000
+    num_train_timesteps_used: int = 1000
+    use_manual_timesteps: bool = False
+    manual_timesteps: str = "750,250"
+    # highest_sample_
 
     agent_class_weight: float = 10.0
     agent_box_weight: float = 1.0
@@ -163,3 +170,4 @@ class TransfuserConfig:
     def bev_radius(self) -> float:
         values = [self.lidar_min_x, self.lidar_max_x, self.lidar_min_y, self.lidar_max_y]
         return max([abs(value) for value in values])
+    

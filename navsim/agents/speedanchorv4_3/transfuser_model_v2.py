@@ -44,6 +44,30 @@ anchor_minmax = torch.tensor([
     [[-28.36, 22.24],
      [-19.68, 22.32]]
 ], dtype=torch.float32)
+# loss setting 1
+# diffusion_loss_weight = {
+#     "x": [14.0333, 6.3667, 2.7000, 2.0333],
+#     "y": [14.0333, 6.3667, 2.7000, 2.0333]
+# }
+# loss setting 2
+diffusion_loss_weight = {
+    "x": [2.7000, 2.0333, 1.3667, 0.7000],
+    "y": [2.7000, 2.0333, 1.3667, 0.7000]
+}
+
+def convert_string_to_list(s):
+    try:
+        # 使用逗号分割字符串
+        parts = s.split(',')
+        # 将每个部分转换为整数
+        int_list = [int(part) for part in parts]
+        return int_list
+    except ValueError:
+        print(f"Error: Could not convert '{s}' to a list of integers. Please ensure all parts are valid numbers.")
+        return []
+    except AttributeError:
+        print(f"Error: Input must be a string. Received type: {type(s)}")
+        return []
 
 
 class V2TransfuserModel(nn.Module):
@@ -73,6 +97,9 @@ class V2TransfuserModel(nn.Module):
         logger.info("norm_scale: {}".format(config.norm_scale))
         logger.info("Truncated vx: {}".format(config.truncated_vx))
         logger.info("output_result: {}".format(config.output_result))
+        logger.info("odo loss: {}".format(config.odo_loss))
+
+        logger.info("num_train_timesteps_used: {}".format(config.num_train_timesteps_used))
 
         self._keyval_embedding = nn.Embedding(8**2 + 1, config.tf_d_model)  # 8x8 feature grid + trajectory
         self._query_embedding = nn.Embedding(sum(self._query_splits), config.tf_d_model)
@@ -141,7 +168,7 @@ class V2TransfuserModel(nn.Module):
         status_feature: torch.Tensor = features["status_feature"] # B,8
         # [driving_command, ego_velocity, ego_acceleration] = [_, _, _, _, vx, vy, ax, ay]
         # 这里的driving_command是啥 4+2+2
-
+        # driving_command: one-hot: (left, forward, right, unknown)
         batch_size = status_feature.shape[0]
 
         bev_feature_upscale, bev_feature, _ = self._backbone(camera_feature, lidar_feature)
@@ -486,7 +513,7 @@ class CustomTransformerDecoder(nn.Module):
         noisy_traj_points = speed_anchor + noisy_odo_bias
         for mod in self.layers:
             # test1 迭代query和traj point/ test2 只迭代query / test3 只迭代 traj point
-            bias_pred, bias_feature1 = mod(bias_feature, noisy_odo_bias, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
+            bias_pred, bias_feature = mod(bias_feature, noisy_odo_bias, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
             bias_pred_list.append(bias_pred)
 
             noisy_traj_points = (self.denorm_odo(bias_pred[...,:2], vec=anchor_minmax) + speed_anchor).clone().detach() # bs,20,8,2
@@ -554,7 +581,7 @@ class TrajectoryHead(nn.Module):
 
 
         self.diffusion_scheduler = DDIMScheduler(
-            num_train_timesteps=1000,
+            num_train_timesteps=self.config.num_train_timesteps,
             beta_schedule="scaled_linear",
             prediction_type="sample",
             timestep_spacing=self.config.infer_timestep_spacing
@@ -677,12 +704,14 @@ class TrajectoryHead(nn.Module):
         velo = torch.stack([velo_ego, torch.zeros_like(velo_ego)], dim=-1).to(device)
         speed_anchor = velo.unsqueeze(1) * torch.linspace(0.5, 4, steps=8).unsqueeze(0).unsqueeze(-1).to(device)
         speed_anchor = speed_anchor.squeeze(1)
-        odo_bias = torch.stack([gt_trajs[...,:2]-speed_anchor]*n_trajs, dim=1).float().to(device) # torch.Size([64, 20, 8, 2])
+        gt_odo_bias = torch.stack([gt_trajs[...,:2]-speed_anchor]*n_trajs, dim=1).float().to(device) # torch.Size([64, 20, 8, 2])
+        odo_bias = gt_odo_bias
 
         odo_info_fut = self.norm_odo(odo_bias, vec=anchor_minmax) # torch.Size([64, 20, 8, 2])
+        normed_gt_odo_bias = odo_info_fut.detach().clone() 
         odo_info_fut = odo_info_fut.view(bs*n_trajs, 8, 2) # torch.Size([1280, 8, 2])
         timesteps = torch.randint(
-            0, 1000,
+            0, self.config.num_train_timesteps_used,
             (bs * n_trajs,), device=device
         ) 
         noise = torch.randn(odo_info_fut.shape, device=device) * self.config.random_scale
@@ -720,35 +749,90 @@ class TrajectoryHead(nn.Module):
         # poses_regs = torch.stack(poses_reg_list, dim=0) # torch.Size([64, 20, 8, 3])
         trajectory_loss_dict = {}
         diffusion_loss_dict = {}
+        odo_bias_loss_dict = {}
         ret_traj_loss, ret_diffusion_loss = 0, 0
-        for idx, poses_reg in enumerate(poses_reg_list):
+        for idx, odo_bias in enumerate(poses_reg_list):
             # trajectory_loss == diffusion loss, i.e, pred x0 in diffusion
-            poses_reg[...,0:2] = self.denorm_odo(poses_reg[...,0:2], vec=anchor_minmax) # denorm x,y
-            poses = torch.concatenate([
-                poses_reg[...,0:2] + speed_anchor.unsqueeze(1), 
-                poses_reg[...,2:3]
+            odo_bias_normed = odo_bias[...,0:2] # torch.Size([64, 20, 8, 2])
+            odo_bias[...,0:2] = self.denorm_odo(odo_bias[...,0:2], vec=anchor_minmax) # denorm x,y
+
+            pred_traj = torch.concatenate([
+                odo_bias[...,0:2] + speed_anchor.unsqueeze(1), 
+                odo_bias[...,2:3]
             ],dim=-1).float()
 
-            if self.config.use_mse_loss:
-                trajectory_loss = F.mse_loss(poses, # pred
-                                            torch.stack([gt_trajs] * n_trajs, dim=1)# gt
-                                            )
+            if self.config.odo_loss:
+                if self.config.use_mse_loss:
+                    trajectory_loss = F.mse_loss(odo_bias_normed,normed_gt_odo_bias)
+                else:
+                    trajectory_loss = F.l1_loss(odo_bias_normed,normed_gt_odo_bias)*100.0
             else:
-                trajectory_loss = F.l1_loss(poses, # pred
-                                        torch.stack([gt_trajs] * n_trajs, dim=1)# gt
-                                        )
+                if self.config.use_mse_loss:
+                    trajectory_loss = F.mse_loss(pred_traj, torch.stack([gt_trajs] * n_trajs, dim=1))# gt
+                else:
+                    if self.config.use_different_loss_weight:
+                        trajectory_loss_ori = F.l1_loss(pred_traj, torch.stack([gt_trajs] * n_trajs, dim=1), reduction='none') # 64, 20, 8, 3
+                        trajectory_loss = torch.zeros_like(trajectory_loss_ori)
+                        for i in range(4):
+                            trajectory_loss[..., 2*i:2*i+2, 0] = trajectory_loss_ori[..., 2*i:2*i+2, 0] * diffusion_loss_weight['x'][i]
+                            trajectory_loss[..., 2*i:2*i+2, 1] = trajectory_loss_ori[..., 2*i:2*i+2, 1] * diffusion_loss_weight['y'][i]
+                            trajectory_loss[..., 2*i:2*i+2, 2] = trajectory_loss_ori[..., 2*i:2*i+2, 2]
+                        trajectory_loss = trajectory_loss.mean()
+                    else:
+                        trajectory_loss = F.l1_loss(pred_traj, torch.stack([gt_trajs] * n_trajs, dim=1))
+
             trajectory_loss_dict[f"trajectory_loss_{idx}"] = trajectory_loss
             ret_traj_loss += trajectory_loss
 
-        return {"trajectory": poses, 
+        return {"trajectory": pred_traj, 
                 "trajectory_loss":ret_traj_loss,
                 "trajectory_loss_dict":trajectory_loss_dict
-                }   
+                }
+      
+    @staticmethod
+    def generate_infer_timesteps(num_inference_steps: int, num_train_timesteps, timestep_spacing, device: Union[str, torch.device] = None):
+        """
+        Sets the discrete timesteps used for the diffusion chain (to be run before inference).
+
+        Args:
+            num_inference_steps (`int`):
+                The number of diffusion steps used when generating samples with a pre-trained model.
+        """
+        # "linspace", "leading", "trailing" corresponds to annotation of Table 2. of https://arxiv.org/abs/2305.08891
+        if timestep_spacing == "linspace":
+            timesteps = (
+                np.linspace(0, num_train_timesteps - 1, num_inference_steps)
+                .round()[::-1]
+                .copy()
+                .astype(np.int64)
+            )
+        elif timestep_spacing == "leading":
+            step_ratio = num_train_timesteps // num_inference_steps
+            # creates integer timesteps by multiplying by ratio
+            # casting to int to avoid issues when num_inference_step is power of 3
+            timesteps = (np.arange(0, num_inference_steps) * step_ratio).round()[::-1].copy().astype(np.int64)
+        elif timestep_spacing == "trailing":
+            step_ratio = num_train_timesteps / num_inference_steps
+            # creates integer timesteps by multiplying by ratio
+            # casting to int to avoid issues when num_inference_step is power of 3
+            timesteps = np.round(np.arange(num_train_timesteps, 0, -step_ratio)).astype(np.int64)
+            timesteps -= 1
+        else:
+            raise ValueError(
+                f"{timestep_spacing} is not supported. Please make sure to choose one of 'leading' or 'trailing'."
+            )
+
+        return torch.from_numpy(timesteps).to(device)
+
 
     def forward_test_speed_anchor(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding, status_feature, global_img) -> Dict[str, torch.Tensor]:
         bs = ego_query.shape[0]
         device = ego_query.device
         self.diffusion_scheduler.set_timesteps(self.infer_step_num, device)
+        if self.config.num_train_timesteps != self.config.num_train_timesteps_used:
+            temp_timesteps = self.generate_infer_timesteps(self.config.infer_step_num, self.config.num_train_timesteps_used, self.config.infer_timestep_spacing, device=device)
+        if self.config.use_manual_timesteps:
+            temp_timesteps = torch.from_numpy(np.array(convert_string_to_list(self.config.manual_timesteps))).to(device)
         denoise_steps = list(range(0, self.infer_step_num))
 
         velo_ego = status_feature[..., 4:5] # x only
@@ -761,12 +845,16 @@ class TrajectoryHead(nn.Module):
 
         odo_bias = torch.randn((bs, 1, 8, 2)).to(device) * self.config.random_scale
         odo_info_fut = self.norm_odo(odo_bias.to(device), vec=anchor_minmax)
+        # odo_info_fut = odo_bias
         n_trajs = odo_info_fut.shape[1]
         traj_list = {}
 
         for step_idx in denoise_steps:
-
-            k = self.diffusion_scheduler.timesteps[:][step_idx]
+            
+            if (self.config.num_train_timesteps != self.config.num_train_timesteps_used) or self.config.use_manual_timesteps:
+                k = temp_timesteps[:][step_idx]
+            else:
+                k = self.diffusion_scheduler.timesteps[:][step_idx]
             timesteps = k
             if not torch.is_tensor(timesteps):
                 # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
