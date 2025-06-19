@@ -81,7 +81,7 @@ class TransfuserConfig:
     trajectory_weight: float = 12.0
     trajectory_cls_weight: float = 10.0
     trajectory_reg_weight: float = 8.0
-    diff_loss_weight: float = 20.0
+    # diff_loss_weight: float = 20.0
     
     # vddrive
     infer_step_num: int = 2

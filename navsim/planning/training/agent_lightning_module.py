@@ -4,7 +4,8 @@ from torch import Tensor
 from typing import Dict, Tuple
 
 from navsim.agents.abstract_agent import AbstractAgent
-
+# import logging
+# logger = logging.getLogger(__name__)
 
 class AgentLightningModule(pl.LightningModule):
     """Pytorch lightning wrapper for learnable agent."""
@@ -32,7 +33,7 @@ class AgentLightningModule(pl.LightningModule):
         loss_dict = self.agent.compute_loss(features, targets, prediction)
         for k, v in loss_dict.items():
             if v is not None:
-                self.log(f"{logging_prefix}/{k}", v, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, batch_size=len(batch[0]))
+                self.log(f"{logging_prefix}/{k}", v, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, batch_size=len(batch[0]), logger=True)
         return loss_dict['loss']
 
     def training_step(self, batch: Tuple[Dict[str, Tensor], Dict[str, Tensor]], batch_idx: int) -> Tensor:

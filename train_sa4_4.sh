@@ -1,12 +1,15 @@
 #!/bin/bash
 source scripts/01_env.sh
 cd ${WORKING_PATH}
-agent_name=speedanchorv4.3
+agent_name=speedanchorv4.4
 random_scale='1.0'
 norm_scale=1
 num_train_timesteps=1000
 num_train_timesteps_used=1000
-truncated_vx=False
+truncated_vx=True
+num_gpus=$(nvidia-smi -L | wc -l)
+ray_worker=$((num_gpus * 13))
+# echo $ray_worker
 
 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         agent=$agent_name \
@@ -22,8 +25,8 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_training.py \
         +agent.config.num_train_timesteps=$num_train_timesteps \
         +agent.config.num_train_timesteps_used=$num_train_timesteps_used\
         +agent.config.truncated_vx=${truncated_vx} \
-        +agent.config.use_different_loss_weight=False \
-        +lr=12e-4
+        +agent.config.use_different_loss_weight=True \
+        +agent.config.trajectory_weight=6
 
         # +agent.config.odo_loss=True \
         # +agent.config.use_mse_loss=True \
@@ -59,6 +62,7 @@ for ckpt_path in "${ckpt_paths[@]}"; do
         agent=$agent_name \
         worker=ray_distributed \
         "agent.checkpoint_path=$escaped_path"\
+        worker.threads_per_node=$ray_worker\
         metric_cache_path="${WORKING_PATH}/metric_cache/" \
         experiment_name=${agent_name}_eval2 \
         +agent.config.random_scale=${random_scale}\
@@ -73,6 +77,7 @@ for ckpt_path in "${ckpt_paths[@]}"; do
         agent=$agent_name \
         worker=ray_distributed \
         "agent.checkpoint_path=$escaped_path"\
+        worker.threads_per_node=$ray_worker\
         metric_cache_path="${WORKING_PATH}/metric_cache/" \
         experiment_name=${agent_name}_eval2_500 \
         +agent.config.random_scale=${random_scale}\
@@ -86,8 +91,9 @@ for ckpt_path in "${ckpt_paths[@]}"; do
         worker=ray_distributed \
         "agent.checkpoint_path=$escaped_path"\
         metric_cache_path="${WORKING_PATH}/metric_cache/" \
-        experiment_name=${agent_name}_eval_step10 \
-        +agent.config.infer_step_num=10 \
+        worker.threads_per_node=$ray_worker\
+        experiment_name=${agent_name}_eval_step4 \
+        +agent.config.infer_step_num=4 \
         +agent.config.random_scale=${random_scale}\
         +agent.config.norm_scale=${norm_scale}\
         +agent.config.use_clamp=True\
@@ -115,8 +121,8 @@ for ckpt_path in "${ckpt_paths[@]}"; do
 done
 
 python mean_csv.py --directory /job_data/${agent_name}_eval2/ --output /job_data/ --name step2
-# python mean_csv.py --directory /job_data/${agent_name}_eval2_500/ --output /job_data/ --name step2_500
+python mean_csv.py --directory /job_data/${agent_name}_eval2_500/ --output /job_data/ --name step2_500
 # python mean_csv.py --directory /job_data/${agent_name}_eval2_0/ --output /job_data/ --name step2_0
-python mean_csv.py --directory /job_data/${agent_name}_eval_step10/ --output /job_data/ --name step10
+python mean_csv.py --directory /job_data/${agent_name}_eval_step4/ --output /job_data/ --name step4
 
 

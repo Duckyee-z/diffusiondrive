@@ -12,7 +12,7 @@ from navsim.agents.speedanchorv4_4.modules.conditional_unet1d import Conditional
 import torch.nn.functional as F
 from navsim.agents.speedanchorv4_4.modules.blocks import linear_relu_ln,bias_init_with_prob, gen_sineembed_for_position, GridSampleCrossBEVAttention
 from navsim.agents.speedanchorv4_4.modules.multimodal_loss import LossComputer
-from torch.nn import TransformerDecoder,TransformerDecoderLayer
+# from torch.nn import TransformerDecoder,TransformerDecoderLayer
 from typing import Any, List, Dict, Optional, Union
 
 import logging
@@ -70,6 +70,44 @@ def convert_string_to_list(s):
         return []
 
 
+# class LossComputer(nn.Module):
+#     def __init__(self,config: TransfuserConfig):
+#         self._config = config
+#         super(LossComputer, self).__init__()
+#         self.reg_loss_fn = nn.SmoothL1Loss()
+#         self.cls_loss_fn = nn.CrossEntropyLoss()
+
+#         self.reg_loss_weight = config.trajectory_reg_weight
+#         self.cls_loss_weight = config.trajectory_cls_weight
+
+
+#     def forward(self, pred_odo, pred_odo_score, targets):
+#         """
+#         pred_traj: (bs, 20, 8, 3)
+#         pred_cls: (bs, 20)
+#         plan_anchor: (bs,20, 8, 2)
+#         targets['trajectory']: (bs, 8, 3)
+#         """
+#         bs = pred_odo.size(0)
+
+#         diff = pred_odo - targets.unsqueeze(1)
+#         distances = torch.norm(diff, p=2, dim=(-1, -2))
+#         best_idx = torch.argmin(distances, dim=1)
+#         # best_trajectory_indices_expanded: B x 1 x 1 x 1
+#         best_bias_expanded = best_idx.view(bs, 1, 1, 1).expand(-1, -1, pred_odo.size(2), pred_odo.size(3))
+#         # best_predicted_trajectory: B x 1 x 8 x 2 -> B x 8 x 2
+#         best_bias = torch.gather(pred_odo, 1, best_bias_expanded).squeeze(1)
+#         reg_loss = self.reg_loss_fn(best_bias, targets)
+
+#         pred_odo_score = F.softmax(pred_odo_score, dim=1)
+#         cls_loss = self.cls_loss_fn(pred_odo_score, best_idx)
+
+#         loss = reg_loss * self.reg_loss_weight + cls_loss * self.cls_loss_weight
+#         return loss
+        
+
+
+
 class V2TransfuserModel(nn.Module):
     """Torch module for Transfuser."""
 
@@ -88,16 +126,14 @@ class V2TransfuserModel(nn.Module):
 
         self._config = config
         self._backbone = TransfuserBackbone(config)
-        logger.info("================= Init SpeedAnchorV4.1 maxnorm ====================")
+        logger.info("================= Init SpeedAnchorV4.4 maxnorm ====================")
         logger.info("infer_step_num: {}".format(config.infer_step_num))
         logger.info("random_scale: {}".format(config.random_scale))
 
-        logger.info("use mse loss: {}".format(config.use_mse_loss))
         logger.info("use clamp: {}".format(config.use_clamp))
         logger.info("norm_scale: {}".format(config.norm_scale))
         logger.info("Truncated vx: {}".format(config.truncated_vx))
         logger.info("output_result: {}".format(config.output_result))
-        logger.info("odo loss: {}".format(config.odo_loss))
 
         logger.info("num_train_timesteps_used: {}".format(config.num_train_timesteps_used))
 
@@ -254,13 +290,16 @@ class DiffMotionPlanningRefinementModule(nn.Module):
         self,
         embed_dims=256,
         ego_fut_ts=8,
-        ego_fut_mode=20,
         if_zeroinit_reg=True,
     ):
         super(DiffMotionPlanningRefinementModule, self).__init__()
         self.embed_dims = embed_dims
         self.ego_fut_ts = ego_fut_ts
 
+        self.score_branch = nn.Sequential(
+            *linear_relu_ln(embed_dims, 1, 2),
+            nn.Linear(embed_dims, 1),
+        )
         self.plan_reg_branch = nn.Sequential(
             nn.Linear(embed_dims, embed_dims),
             nn.ReLU(),
@@ -277,8 +316,8 @@ class DiffMotionPlanningRefinementModule(nn.Module):
             nn.init.constant_(self.plan_reg_branch[-1].weight, 0)
             nn.init.constant_(self.plan_reg_branch[-1].bias, 0)
 
-        # bias_init = bias_init_with_prob(0.01)
-        # nn.init.constant_(self.plan_cls_branch[-1].bias, bias_init)
+        bias_init = bias_init_with_prob(0.01)
+        nn.init.constant_(self.score_branch[-1].bias, bias_init)
     def forward(
         self,
         traj_feature,
@@ -290,9 +329,9 @@ class DiffMotionPlanningRefinementModule(nn.Module):
 
         traj_delta = self.plan_reg_branch(traj_feature)
 
-        plan_reg = traj_delta.reshape(bs,ego_fut_mode, self.ego_fut_ts, 3)
-
-        return plan_reg
+        odo_bias = traj_delta.reshape(bs,ego_fut_mode, self.ego_fut_ts, 3)
+        odo_score = self.score_branch(traj_feature)
+        return odo_bias, odo_score
     
 class ModulationLayer(nn.Module):
 
@@ -380,7 +419,6 @@ class CustomTransformerDecoderLayer(nn.Module):
         self.task_decoder = DiffMotionPlanningRefinementModule(
             embed_dims=config.tf_d_model,
             ego_fut_ts=num_poses,
-            ego_fut_mode=20,
         )
 
     def forward(self, 
@@ -411,12 +449,12 @@ class CustomTransformerDecoderLayer(nn.Module):
         bias_feature = self.time_modulation(bias_feature, time_embed, global_cond=None,global_img=global_img)
         
         # 4.9 predict the offset & heading
-        poses_reg = self.task_decoder(bias_feature) #bs,20,8,3; bs,20
+        odo_bias, odo_score = self.task_decoder(bias_feature) #bs,20,8,3; bs,20
         # poses_reg[...,:2] = poses_reg[...,:2]+noisy_traj_points
-        poses_reg[...,:2] = poses_reg[...,:2]
-        poses_reg[..., StateSE2Index.HEADING] = poses_reg[..., StateSE2Index.HEADING].tanh() * np.pi
+        # poses_reg[...,:2] = poses_reg[...,:2]
+        odo_bias[..., StateSE2Index.HEADING] = odo_bias[..., StateSE2Index.HEADING].tanh() * np.pi
 
-        return poses_reg, bias_feature
+        return odo_bias, odo_score, bias_feature
     
 def _get_clones(module, N):
     # FIXME: copy.deepcopy() is not defined on nn.module
@@ -508,17 +546,18 @@ class CustomTransformerDecoder(nn.Module):
                 time_embed, 
                 status_encoding,
                 global_img=None):
-        bias_pred_list = []
+        bias_pred_list, score_pred_list = [], []
 
         noisy_traj_points = speed_anchor + noisy_odo_bias
         for mod in self.layers:
             # test1 迭代query和traj point/ test2 只迭代query / test3 只迭代 traj point
-            bias_pred, bias_feature = mod(bias_feature, noisy_odo_bias, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
+            bias_pred, score_pred, bias_feature = mod(bias_feature, noisy_odo_bias, noisy_traj_points, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
             bias_pred_list.append(bias_pred)
+            score_pred_list.append(score_pred.squeeze(-1)) # bs,20
 
             noisy_traj_points = (self.denorm_odo(bias_pred[...,:2], vec=anchor_minmax) + speed_anchor).clone().detach() # bs,20,8,2
             # traj_points = poses_reg[...,:2].clone().detach()
-        return bias_pred_list
+        return bias_pred_list, score_pred_list
     
 class TransformerBlock(nn.Module):
     def __init__(self, embed_dims=256, drop_ratio=0.1):
@@ -619,6 +658,7 @@ class TrajectoryHead(nn.Module):
             nn.ReLU(),
             nn.Linear(d_model * 2, d_model),
         )
+        self.loss_computer = LossComputer(config=config)
         # if self.config.anchor_embed_interact:
         #     self.anchor_attn = TransformerBlock(embed_dims=d_model, drop_ratio=0.1)
 
@@ -690,6 +730,7 @@ class TrajectoryHead(nn.Module):
             return self.forward_train_speed_anchor(ego_query, agents_query, bev_feature,bev_spatial_shape,status_encoding,status_feature,targets,global_img)
         else :
             return self.forward_test_speed_anchor(ego_query, agents_query, bev_feature,bev_spatial_shape,status_encoding,status_feature,global_img)
+        
     
     def forward_train_speed_anchor(self, ego_query, agents_query, bev_feature, bev_spatial_shape, status_encoding, status_feature, targets=None, global_img=None) -> Dict[str, torch.Tensor]:
         bs = ego_query.shape[0] # ego_query torch.Size([64, 1, 256]) agents_query torch.Size([64, 30, 256])
@@ -745,33 +786,22 @@ class TrajectoryHead(nn.Module):
 
         # noisy_traj_points = noisy_odo_bias + speed_anchor_stacked
         # 4. begin the stacked decoder
-        poses_reg_list = self.diff_decoder(bias_feature, noisy_odo_bias, speed_anchor_stacked, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
+        pred_odo_list, pred_score_list = self.diff_decoder(bias_feature, noisy_odo_bias, speed_anchor_stacked, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
         # poses_regs = torch.stack(poses_reg_list, dim=0) # torch.Size([64, 20, 8, 3])
         trajectory_loss_dict = {}
         diffusion_loss_dict = {}
         odo_bias_loss_dict = {}
         ret_traj_loss, ret_diffusion_loss = 0, 0
-        for idx, odo_bias in enumerate(poses_reg_list):
+        for idx, (pred_odo, pred_score) in enumerate(zip(pred_odo_list, pred_score_list)):
             # trajectory_loss == diffusion loss, i.e, pred x0 in diffusion
-            odo_bias_normed = odo_bias[...,0:2] # torch.Size([64, 20, 8, 2])
-            odo_bias[...,0:2] = self.denorm_odo(odo_bias[...,0:2], vec=anchor_minmax) # denorm x,y
+            odo_bias_normed = pred_odo[...,0:2] # torch.Size([64, 20, 8, 2])
+            pred_odo[...,0:2] = self.denorm_odo(pred_odo[...,0:2], vec=anchor_minmax) # denorm x,y
 
             pred_traj = torch.concatenate([
-                odo_bias[...,0:2] + speed_anchor.unsqueeze(1), 
-                odo_bias[...,2:3]
+                pred_odo[...,0:2] + speed_anchor.unsqueeze(1), 
+                pred_odo[...,2:3]
             ],dim=-1).float()
-
-            if self.config.use_different_loss_weight:
-                trajectory_loss_ori = F.l1_loss(pred_traj, torch.stack([gt_trajs] * n_trajs, dim=1), reduction='none') # 64, 20, 8, 3
-                trajectory_loss = torch.zeros_like(trajectory_loss_ori)
-                for i in range(4):
-                    trajectory_loss[..., 2*i:2*i+2, 0] = trajectory_loss_ori[..., 2*i:2*i+2, 0] * diffusion_loss_weight['x'][i]
-                    trajectory_loss[..., 2*i:2*i+2, 1] = trajectory_loss_ori[..., 2*i:2*i+2, 1] * diffusion_loss_weight['y'][i]
-                    trajectory_loss[..., 2*i:2*i+2, 2] = trajectory_loss_ori[..., 2*i:2*i+2, 2]
-                trajectory_loss = trajectory_loss.mean()
-            else:
-                trajectory_loss = F.l1_loss(pred_traj, torch.stack([gt_trajs] * n_trajs, dim=1))
-
+            trajectory_loss = self.loss_computer(pred_traj, pred_score, gt_trajs)
             trajectory_loss_dict[f"trajectory_loss_{idx}"] = trajectory_loss
             ret_traj_loss += trajectory_loss
 
@@ -819,6 +849,8 @@ class TrajectoryHead(nn.Module):
     def forward_test_speed_anchor(self, ego_query,agents_query,bev_feature,bev_spatial_shape,status_encoding, status_feature, global_img) -> Dict[str, torch.Tensor]:
         bs = ego_query.shape[0]
         device = ego_query.device
+        n_trajs = self.n_trajs
+
         self.diffusion_scheduler.set_timesteps(self.infer_step_num, device)
         if self.config.num_train_timesteps != self.config.num_train_timesteps_used:
             temp_timesteps = self.generate_infer_timesteps(self.config.infer_step_num, self.config.num_train_timesteps_used, self.config.infer_timestep_spacing, device=device)
@@ -832,12 +864,11 @@ class TrajectoryHead(nn.Module):
             velo_ego[velo_mask] = 0
         velo = torch.stack([velo_ego, torch.zeros_like(velo_ego)], dim=-1).to(device)
         speed_anchor = velo.unsqueeze(1) * torch.linspace(0.5, 4, steps=8).unsqueeze(0).unsqueeze(-1).to(device).float()
-        speed_anchor_stacked=speed_anchor
+        speed_anchor_stacked=speed_anchor.repeat(1, n_trajs, 1, 1).view(bs, n_trajs, 8, 2) # torch.Size([64, 20, 8, 2])
 
-        odo_bias = torch.randn((bs, 1, 8, 2)).to(device) * self.config.random_scale
+        odo_bias = torch.randn((bs, self.n_trajs, 8, 2)).to(device) * self.config.random_scale
         odo_info_fut = self.norm_odo(odo_bias.to(device), vec=anchor_minmax)
         # odo_info_fut = odo_bias
-        n_trajs = odo_info_fut.shape[1]
         traj_list = {}
 
         for step_idx in denoise_steps:
@@ -860,31 +891,36 @@ class TrajectoryHead(nn.Module):
             noisy_odo_bias = self.denorm_odo(noisy_odo_bias, vec=anchor_minmax)
 
             bias_anchor_points = torch.concat([noisy_odo_bias, speed_anchor_stacked], dim=1) # torch.Size([64, 40, 8, 4])
-            bias_anchor_embed = gen_sineembed_for_position(bias_anchor_points,hidden_dim=64) # torch.Size([64, 20, 8, 64])
-            bias_anchor_embed = bias_anchor_embed.flatten(-2) # torch.Size([64, 20, 8, 512])
+            bias_anchor_embed = gen_sineembed_for_position(bias_anchor_points,hidden_dim=64) # torch.Size([64, 40, 8, 64])
+            bias_anchor_embed = bias_anchor_embed.flatten(-2) # torch.Size([64, 40, 512])
             bias_anchor_feature = self.plan_anchor_encoder(bias_anchor_embed) # torch.Size([64, 20, 256])
             bias_anchor_feature = bias_anchor_feature.view(bs,n_trajs*2,-1) # torch.Size([64, 20, 256])
             bias_feature, anchor_feature = torch.chunk(bias_anchor_feature, 2, dim=1) # torch.Size([64, 20, 256]), torch.Size([64, 20, 256])
             
             
             timesteps = timesteps.expand(odo_info_fut.shape[0])
-
-            time_embed = self.time_mlp(timesteps)
-            time_embed = time_embed.view(bs,n_trajs,-1)
+            time_embed = self.time_mlp(timesteps) # torch.Size([64, 256])
+            time_embed = time_embed.unsqueeze(1).repeat(1, n_trajs, 1) # torch.Size([64, 1, 256])
             time_embed = torch.concat([time_embed, anchor_feature], dim=-1).to(device) 
             time_embed = self.anchor_embedder(time_embed)
-            ego_query = self.cross_attn(ego_query, agents_query, agents_query, skip=ego_query)
-            time_embed = self.fusion_embed(torch.cat([ego_query, time_embed], dim=-1))
+            # ego_query = ego_query.unsqueeze(1).repeat(1, n_trajs, 1)
+            _ego_query = self.cross_attn(ego_query, agents_query, agents_query, skip=ego_query)
+            _ego_query = _ego_query.repeat(1, n_trajs, 1) # torch.Size([64, 20, 256])
+            time_embed = self.fusion_embed(torch.cat([_ego_query, time_embed], dim=-1))
 
             # noisy_traj_points = noisy_odo_bias + speed_anchor_stacked
 
-            poses_reg_list = self.diff_decoder(bias_feature, noisy_odo_bias, speed_anchor_stacked, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
+            poses_reg_list, poses_cls_list= self.diff_decoder(bias_feature, noisy_odo_bias, speed_anchor_stacked, bev_feature, bev_spatial_shape, agents_query, ego_query, time_embed, status_encoding, global_img)
             poses_reg = poses_reg_list[-1]
+            poses_cls = poses_cls_list[-1]
             poses_reg[...,:2] = self.denorm_odo(poses_reg[...,:2], vec=anchor_minmax) # denorm x,y
-            pred_traj = torch.concatenate([
+            pred_traj_prop= torch.concatenate([
                 poses_reg[...,0:2] + speed_anchor, 
                 poses_reg[...,2:3]
             ],dim=-1).squeeze(1)
+            mode_idx = poses_cls.argmax(dim=-1)
+            mode_idx = mode_idx[...,None,None,None].repeat(1,1,self._num_poses,3)
+            pred_traj = torch.gather(pred_traj_prop, 1, mode_idx).squeeze(1)
             traj_list.update({f"trajectory_{k}": pred_traj})
 
             x_start = poses_reg[...,:2]
@@ -894,13 +930,9 @@ class TrajectoryHead(nn.Module):
                 timestep=k,
                 sample=odo_info_fut
             ).prev_sample
-
-        best_traj = torch.concatenate([
-                poses_reg[...,0:2] + speed_anchor, 
-                poses_reg[...,2:3]
-            ],dim=-1).squeeze(1)
+        
         if self.config.infer_step_num == 2:
             if self.config.output_result:
                 return {"trajectory":traj_list[self.config.output_result].squeeze(1)}
-        return {"trajectory":best_traj.squeeze(1)}
+        return {"trajectory":pred_traj.squeeze(1)}
     

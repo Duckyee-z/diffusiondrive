@@ -882,8 +882,8 @@ class TrajectoryHead(nn.Module):
             time_embed = time_embed.view(bs,n_trajs,-1)
             time_embed = torch.concat([time_embed, anchor_feature], dim=-1).to(device) 
             time_embed = self.anchor_embedder(time_embed)
-            ego_query = self.cross_attn(ego_query, agents_query, agents_query, skip=ego_query)
-            time_embed = self.fusion_embed(torch.cat([ego_query, time_embed], dim=-1))
+            _ego_query = self.cross_attn(ego_query, agents_query, agents_query, skip=ego_query)
+            time_embed = self.fusion_embed(torch.cat([_ego_query, time_embed], dim=-1))
 
             # noisy_traj_points = noisy_odo_bias + speed_anchor_stacked
 

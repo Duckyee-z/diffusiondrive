@@ -121,21 +121,20 @@ class LossComputer(nn.Module):
         # self.focal_loss = FocalLoss(use_sigmoid=True, gamma=2.0, alpha=0.25, reduction='mean', loss_weight=1.0, activated=False)
         self.cls_loss_weight = config.trajectory_cls_weight
         self.reg_loss_weight = config.trajectory_reg_weight
-    def forward(self, poses_reg, poses_cls, targets, plan_anchor):
+    def forward(self, pred_traj, poses_cls, targets):
         """
         pred_traj: (bs, 20, 8, 3)
         pred_cls: (bs, 20)
-        plan_anchor: (bs,20, 8, 2)
-        targets['trajectory']: (bs, 8, 3)
+        # plan_anchor: (bs,20, 8, 2)
+        # targets['trajectory']: (bs, 8, 3)
         """
-        bs, num_mode, ts, d = poses_reg.shape
-        target_traj = targets["trajectory"]
-        dist = torch.linalg.norm(target_traj.unsqueeze(1)[...,:2] - plan_anchor, dim=-1) # torch.Size([64, 20, 8])
+        bs, num_mode, ts, d = pred_traj.shape
+        dist = torch.linalg.norm(pred_traj.unsqueeze(1)[...,:2] - targets, dim=-1) # torch.Size([64, 20, 8])
         dist = dist.mean(dim=-1) # torch.Size([64, 20]) 
         mode_idx = torch.argmin(dist, dim=-1)
         cls_target = mode_idx # torch.Size([64])
         mode_idx = mode_idx[...,None,None,None].repeat(1,1,ts,d) # torch.Size([64, 1, 8, 3])
-        best_reg = torch.gather(poses_reg, 1, mode_idx).squeeze(1) # torch.Size([64, 8, 3])
+        best_traj = torch.gather(pred_traj, 1, mode_idx).squeeze(1) # torch.Size([64, 8, 3])
         # import ipdb; ipdb.set_trace()
         # Calculate cls loss using focal loss
         target_classes_onehot = torch.zeros([bs, num_mode],
@@ -156,7 +155,7 @@ class LossComputer(nn.Module):
         )
 
         # Calculate regression loss
-        reg_loss = self.reg_loss_weight * F.l1_loss(best_reg, target_traj)
+        reg_loss = self.reg_loss_weight * F.l1_loss(best_traj, targets)
         # import ipdb; ipdb.set_trace()
         # Combine classification and regression losses
         ret_loss = loss_cls + reg_loss

@@ -13,7 +13,7 @@ from navsim.common.dataclasses import SceneFilter
 from navsim.common.dataloader import SceneLoader
 from navsim.planning.training.dataset import CacheOnlyDataset, Dataset
 from navsim.planning.training.agent_lightning_module import AgentLightningModule
-
+from pytorch_lightning.loggers import CSVLogger # 导入 CSVLogger
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = "config/training"
@@ -129,9 +129,10 @@ def main(cfg: DictConfig) -> None:
     logger.info("Num training samples: %d", len(train_data))
     val_dataloader = DataLoader(val_data, **cfg.dataloader.params, shuffle=False)
     logger.info("Num validation samples: %d", len(val_data))
-
+    
+    csv_logger = CSVLogger(cfg.output_dir)
     logger.info("Building Trainer")
-    trainer = pl.Trainer(**cfg.trainer.params, callbacks=agent.get_training_callbacks())
+    trainer = pl.Trainer(**cfg.trainer.params, callbacks=agent.get_training_callbacks(),logger=csv_logger)
 
     logger.info("Starting Training")
     trainer.fit(

@@ -9,7 +9,8 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
         experiment_name=${agent_name}_test_exp \
         +agent.config.use_clamp=True \
         +agent.config.use_manual_timesteps=True\
-        +agent.config.manual_timesteps=\'800,200\' 
+        +agent.config.manual_timesteps=\'800,200\' \
+        worker.threads_per_node=$ray_worker
 
         # +agent.config.infer_step_num=10
         # +agent.config.with_query_as_embedding=True \
